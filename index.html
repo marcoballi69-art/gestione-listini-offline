@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#174f86">
+<link rel="manifest" href="./manifest.webmanifest">
+<title>Gestione Listini — Offline</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1f2937;background:#f1f5f9}
+*{box-sizing:border-box}body{margin:0 auto;max-width:820px;padding:14px}
+header,.panel{background:white;border:1px solid #dce3eb;border-radius:16px;padding:16px;margin-bottom:14px}
+h1{font-size:1.45rem;margin:0 0 4px}h2{font-size:1.1rem;margin:0 0 12px}
+small,.muted{color:#64748b}.status{font-size:.9rem;padding:8px 10px;border-radius:9px;background:#e8f1fb;margin-top:10px}
+.status.off{background:#fff1d6;color:#754c00}.status.on{background:#e5f6eb;color:#176438}
+label{display:block;font-weight:650;font-size:.9rem;margin:10px 0 5px}
+input,select,textarea{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font:inherit;background:white}
+textarea{min-height:75px}button{border:0;border-radius:10px;padding:12px 14px;background:#1769b0;color:white;font-weight:700;font-size:1rem;cursor:pointer;margin:6px 4px 4px 0}
+button.secondary{background:#e7edf4;color:#1e3a56}button.danger{background:#a62b2b}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}
+.article,.item{padding:12px 0;border-bottom:1px solid #e5eaf0}
+.article:last-child,.item:last-child{border:0}
+.article strong,.item strong{display:block}.price{color:#52657b;font-size:.9rem}
+.itemgrid{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center}
+#reader{width:100%;max-width:520px;margin:10px auto}
+#reader video{width:100%;border-radius:12px}
+.hidden{display:none!important}
+.pill{display:inline-block;padding:3px 8px;border-radius:20px;background:#edf2f7;font-size:.78rem}
+footer{font-size:.82rem;color:#64748b;padding:8px}
+@media(max-width:520px){body{padding:9px}.panel,header{padding:13px}.row>*{min-width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Gestione Listini</h1>
+  <div class="muted">Prototipo installabile con archivio locale</div>
+  <div id="connection" class="status">Controllo connessione…</div>
+</header>
+
+<section class="panel">
+  <h2>Listino sul dispositivo</h2>
+  <p class="muted">Importa un CSV quando sei online o da un file già presente sul dispositivo. Il listino importato resta disponibile offline su questo dispositivo.</p>
+  <label for="csvFile">File listino CSV</label>
+  <input id="csvFile" type="file" accept=".csv,text/csv">
+  <div class="row">
+    <button id="importCsv">Importa listino</button>
+    <button id="exportData" class="secondary">Esporta dati locali</button>
+  </div>
+  <div id="listinoInfo" class="muted">Nessun listino caricato.</div>
+</section>
+
+<section class="panel">
+  <h2>Ricerca e scansione</h2>
+  <label for="search">Nome o codice articolo</label>
+  <input id="search" type="search" placeholder="Cerca nel listino salvato…">
+  <div class="row">
+    <button id="startScan">Avvia scanner</button>
+    <button id="stopScan" class="secondary">Ferma scanner</button>
+  </div>
+  <div id="reader" class="hidden"></div>
+  <div id="scanMessage" class="status">Scanner non avviato.</div>
+  <div id="results"></div>
+</section>
+
+<section class="panel">
+  <h2>Nuova scelta</h2>
+  <div class="row">
+    <div><label for="choiceDate">Data</label><input id="choiceDate" type="date"></div>
+    <div><label for="customer">Cliente</label><input id="customer" type="text" placeholder="Nome cliente"></div>
+  </div>
+  <label for="generalNote">Note generali</label>
+  <textarea id="generalNote" placeholder="Note per la scelta…"></textarea>
+  <div class="row">
+    <button id="newChoice" class="secondary">Nuova scelta</button>
+    <button id="saveChoice">Salva scelta</button>
+  </div>
+  <h3>Articoli scelti</h3>
+  <div id="choiceItems" class="muted">Nessun articolo nella scelta.</div>
+  <div id="manualAdd" class="hidden">
+    <h3>Articolo non trovato nel listino</h3>
+    <p class="muted">Questo articolo verrà aggiunto solo alla scelta corrente, non al listino.</p>
+    <label for="manualName">Nome articolo</label><input id="manualName" type="text">
+    <label for="manualQty">Quantità / metraggio</label><input id="manualQty" type="text" placeholder="Es. 2 oppure 3,5 m">
+    <button id="addManual">Aggiungi alla scelta</button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Scelte salvate su questo dispositivo</h2>
+  <div id="savedChoices" class="muted">Nessuna scelta salvata.</div>
+</section>
+<footer>Questo prototipo salva i dati in memoria locale del browser. Non sincronizza ancora i dati con Google e non sostituisce la versione attuale.</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

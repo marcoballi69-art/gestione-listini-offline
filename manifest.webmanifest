@@ -1,0 +1,10 @@
+{
+  "name": "Gestione Listini",
+  "short_name": "Listini",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#174f86",
+  "description": "Gestione locale di listini e scelte, utilizzabile offline dopo il primo caricamento."
+}

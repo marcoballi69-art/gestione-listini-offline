@@ -1,0 +1,32 @@
+GESTIONE LISTINI — PROTOTIPO OFFLINE
+
+ATTENZIONE
+Questo è un prototipo tecnico separato dall'app Apps Script attualmente in uso.
+NON sostituisce né modifica la vecchia applicazione.
+NON sincronizza ancora clienti, listini o scelte con Google.
+NON contiene ancora login/ruoli, PDF/email definitivi, importazione PDF o archivio condiviso.
+
+COSA È GIÀ PRESENTE NEL PROTOTIPO
+- PWA installabile su hosting HTTPS (es. GitHub Pages).
+- Service worker per memorizzare l'interfaccia.
+- IndexedDB per salvare listino, scelte e bozze sul dispositivo.
+- Ricerca listino offline.
+- Scelta con cliente, data, note generali, quantità e note per articolo.
+- Articolo non trovato inseribile manualmente nella sola scelta corrente.
+- Scanner basato su html5-qrcode; il service worker tenta di memorizzare la libreria al primo accesso online.
+
+REQUISITI / LIMITI DA VERIFICARE
+- Aprire una prima volta l'app con Internet e attendere il caricamento completo prima di provare offline.
+- La fotocamera richiede HTTPS e autorizzazione del browser.
+- iOS può avere differenze tra Safari installato e browser integrati; va testato su dispositivi reali.
+- La cache della libreria esterna è best-effort: il collaudo deve confermare che la libreria sia effettivamente disponibile dopo aver disattivato la rete.
+- I dati IndexedDB sono locali al browser/dispositivo: cancellazione dati del browser o cambio dispositivo può comportare perdita. Usare periodicamente "Esporta dati locali".
+- L'invio email e la sincronizzazione richiedono Internet.
+
+FORMATO CSV ATTESO
+Colonne: codice,nome,valuta,prezzo
+Esempio:
+12345678,Articolo dimostrativo,EUR,12.50
+
+PROSSIMA FASE
+Collegare questo archivio locale al backend Apps Script esistente con una sincronizzazione autenticata e gestire conflitti/backup prima di sostituire l'app corrente.
