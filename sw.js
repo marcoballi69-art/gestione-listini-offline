@@ -1,4 +1,4 @@
-const CACHE="gestione-listini-shell-v1";
+const CACHE="gestione-listini-shell-v2";
 const APP=["./","./index.html","./app.js","./manifest.webmanifest"];
 const SCANNER="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js";
 self.addEventListener("install",event=>event.waitUntil((async()=>{
