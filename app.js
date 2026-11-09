@@ -61,13 +61,37 @@ async function renderSaved(){const host=$("savedChoices");const choices=(await a
 async function importCsv(){const f=$("csvFile").files[0];if(!f){alert("Seleziona prima un file CSV.");return;}const rows=parseCsv(await f.text());if(!rows.length){alert("Non ho trovato righe valide. Formato atteso: codice,nome,valuta,prezzo.");return;}await clearStore("articles");for(const a of rows)await put("articles",a);await refreshArticles();$("scanMessage").textContent="Listino importato e salvato sul dispositivo.";}
 async function exportData(){const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),choices:await all("choices")};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-gestione-listini.json";a.click();URL.revokeObjectURL(a.href);}
 
-/* PDF: estrae il testo nel browser con PDF.js, senza inviare il documento a Google Drive. */
+/* PDF: legge il testo incorporato; per le scansioni usa OCR italiano con Tesseract.js.
+   Il documento viene elaborato nel browser e non viene inviato a Google Drive. */
+const TESSERACT_URL="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+
+function loadTesseract(){
+ return new Promise((resolve,reject)=>{
+   if(window.Tesseract){resolve(window.Tesseract);return;}
+   let script=document.querySelector('script[data-tesseract="1"]');
+   if(script){
+     if(script.dataset.loaded==="1"){resolve(window.Tesseract);return;}
+     script.addEventListener("load",()=>resolve(window.Tesseract),{once:true});
+     script.addEventListener("error",()=>reject(new Error("Caricamento OCR non riuscito. Controlla la connessione Internet.")),{once:true});
+     return;
+   }
+   script=document.createElement("script");
+   script.src=TESSERACT_URL;
+   script.async=true;
+   script.dataset.tesseract="1";
+   script.onload=()=>{script.dataset.loaded="1";window.Tesseract?resolve(window.Tesseract):reject(new Error("Motore OCR non disponibile."));};
+   script.onerror=()=>reject(new Error("Non riesco a caricare il motore OCR. Apri l'app con Internet e riprova."));
+   document.head.appendChild(script);
+ });
+}
+
 async function extractPdfText(file){
  if(!window.pdfjsLib)throw new Error("Lettore PDF non disponibile. Apri l'app con Internet e riprova.");
  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
  const bytes=new Uint8Array(await file.arrayBuffer());
  const pdf=await pdfjsLib.getDocument({data:bytes}).promise;
  const allLines=[];
+ let ocr=null;
  for(let p=1;p<=pdf.numPages;p++){
    $("pdfMessage").textContent=`Lettura PDF: pagina ${p} di ${pdf.numPages}…`;
    const page=await pdf.getPage(p), content=await page.getTextContent();
@@ -79,11 +103,35 @@ async function extractPdfText(file){
      if(!row){row={y,parts:[]};rows.push(row);}
      row.parts.push({x:item.transform[4],text:item.str.trim()});
    });
+   const pageLines=[];
    rows.sort((a,b)=>b.y-a.y).forEach(r=>{
      r.parts.sort((a,b)=>a.x-b.x);
      const line=r.parts.map(x=>x.text).join(" ").replace(/\s+/g," ").trim();
-     if(line)allLines.push(line);
+     if(line)pageLines.push(line);
    });
+
+   // Le pagine con testo selezionabile restano sul percorso originale.
+   if(pageLines.join(" ").replace(/\s/g,"").length>=25){
+     allLines.push(...pageLines);
+   }else{
+     if(!ocr)ocr=await loadTesseract();
+     $("pdfMessage").textContent=`OCR italiano: pagina ${p} di ${pdf.numPages}…`;
+     const viewport=page.getViewport({scale:2});
+     const canvas=document.createElement("canvas");
+     const context=canvas.getContext("2d");
+     canvas.width=Math.ceil(viewport.width);
+     canvas.height=Math.ceil(viewport.height);
+     await page.render({canvasContext:context,viewport}).promise;
+     const result=await ocr.recognize(canvas,"ita",{
+       logger:m=>{
+         if(m.status==="recognizing text" && m.progress!=null){
+           $("pdfMessage").textContent=`OCR italiano: pagina ${p} di ${pdf.numPages} — ${Math.round(m.progress*100)}%`;
+         }
+       }
+     });
+     allLines.push(...String(result.data.text||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean));
+     canvas.width=0;canvas.height=0;
+   }
  }
  return allLines;
 }
