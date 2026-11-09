@@ -1,6 +1,8 @@
 const DB_NAME="gestione-listini-offline", DB_VERSION=1;
 let db, articles=[], currentItems=[], scanner=null, currentChoiceId=null, lastScan="";
+let pdfPreviewRows=[];
 const $=id=>document.getElementById(id);
+
 function openDb(){return new Promise((resolve,reject)=>{
   const req=indexedDB.open(DB_NAME,DB_VERSION);
   req.onupgradeneeded=()=>{const d=req.result;
@@ -58,7 +60,118 @@ async function saveChoice(){const c=choicePayload();if(!c.customer){alert("Inser
 async function renderSaved(){const host=$("savedChoices");const choices=(await all("choices")).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));host.replaceChildren();if(!choices.length){host.textContent="Nessuna scelta salvata.";return;}choices.forEach(c=>{const d=document.createElement("div");d.className="article";const b=document.createElement("strong");b.textContent=`${c.date||""} — ${c.customer||"Senza cliente"}`;const s=document.createElement("div");s.className="muted";s.textContent=`${(c.items||[]).length} articoli · salvata sul dispositivo`;const edit=document.createElement("button");edit.className="secondary";edit.textContent="Apri";edit.onclick=()=>{currentChoiceId=c.id;$("choiceDate").value=c.date||"";$("customer").value=c.customer||"";$("generalNote").value=c.note||"";currentItems=c.items||[];renderChoice();window.scrollTo({top:0,behavior:"smooth"});};d.append(b,s,edit);host.append(d);});}
 async function importCsv(){const f=$("csvFile").files[0];if(!f){alert("Seleziona prima un file CSV.");return;}const rows=parseCsv(await f.text());if(!rows.length){alert("Non ho trovato righe valide. Formato atteso: codice,nome,valuta,prezzo.");return;}await clearStore("articles");for(const a of rows)await put("articles",a);await refreshArticles();$("scanMessage").textContent="Listino importato e salvato sul dispositivo.";}
 async function exportData(){const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),choices:await all("choices")};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-gestione-listini.json";a.click();URL.revokeObjectURL(a.href);}
-$("importCsv").onclick=importCsv;$("exportData").onclick=exportData;$("search").oninput=renderResults;$("startScan").onclick=startScanner;$("stopScan").onclick=stopScanner;$("newChoice").onclick=newChoice;$("saveChoice").onclick=saveChoice;
+
+/* PDF: estrae il testo nel browser con PDF.js, senza inviare il documento a Google Drive. */
+async function extractPdfText(file){
+ if(!window.pdfjsLib)throw new Error("Lettore PDF non disponibile. Apri l'app con Internet e riprova.");
+ pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+ const bytes=new Uint8Array(await file.arrayBuffer());
+ const pdf=await pdfjsLib.getDocument({data:bytes}).promise;
+ const allLines=[];
+ for(let p=1;p<=pdf.numPages;p++){
+   $("pdfMessage").textContent=`Lettura PDF: pagina ${p} di ${pdf.numPages}…`;
+   const page=await pdf.getPage(p), content=await page.getTextContent();
+   const rows=[];
+   content.items.forEach(item=>{
+     if(!item.str||!item.str.trim())return;
+     const y=Math.round(item.transform[5]);
+     let row=rows.find(r=>Math.abs(r.y-y)<=3);
+     if(!row){row={y,parts:[]};rows.push(row);}
+     row.parts.push({x:item.transform[4],text:item.str.trim()});
+   });
+   rows.sort((a,b)=>b.y-a.y).forEach(r=>{
+     r.parts.sort((a,b)=>a.x-b.x);
+     const line=r.parts.map(x=>x.text).join(" ").replace(/\s+/g," ").trim();
+     if(line)allLines.push(line);
+   });
+ }
+ return allLines;
+}
+function parsePdfLines(lines){
+ const out=[], seen=new Set();
+ const clean=lines.map(x=>String(x).trim()).filter(Boolean);
+ const priceRe=/(\d{1,6}(?:[.,]\d{2}))(?!\d)/;
+ const codeRe=/^\d{1,8}$/;
+ // Prima prova: struttura del listino originale (codice, nome, composizione %, prezzo).
+ for(let i=0;i<clean.length;i++){
+   const codeMatch=clean[i].match(/^\d{1,8}$/);
+   if(!codeMatch)continue;
+   const code=clean[i].padStart(8,"0");
+   let name="",price=null,hasComposition=false;
+   for(let j=i+1;j<Math.min(i+8,clean.length);j++){
+     if(!name && clean[j] && !codeRe.test(clean[j]) && !priceRe.test(clean[j]))name=clean[j];
+     if(clean[j].includes("%"))hasComposition=true;
+     if(j>i+1){const m=clean[j].match(priceRe);if(m){price=Number(m[1].replace(",", "."));break;}}
+   }
+   if(name && price!==null && isFinite(price) && !seen.has(code) && hasComposition){
+     out.push({code,name:name.replace(/\s+EURO\b/i,"").trim(),currency:"EUR",price:String(price)});
+     seen.add(code);
+   }
+ }
+ // Fallback per PDF con codice, descrizione e prezzo vicini ma senza riga composizione.
+ if(!out.length){
+   for(let i=0;i<clean.length;i++){
+     if(!codeRe.test(clean[i]))continue;
+     const code=clean[i].padStart(8,"0");
+     let name="",price=null;
+     for(let j=i+1;j<Math.min(i+6,clean.length);j++){
+       if(!name && !codeRe.test(clean[j]) && !priceRe.test(clean[j]))name=clean[j];
+       const m=clean[j].match(priceRe);
+       if(m){price=Number(m[1].replace(",", "."));break;}
+     }
+     if(name && price!==null && isFinite(price) && !seen.has(code)){
+       out.push({code,name,currency:"EUR",price:String(price)});seen.add(code);
+     }
+   }
+ }
+ return out;
+}
+function renderPdfPreview(rows){
+ const host=$("pdfPreviewList");host.replaceChildren();
+ rows.forEach((a,i)=>{
+   const card=document.createElement("div");card.className="pdf-row";
+   const info=document.createElement("div");
+   const name=document.createElement("strong");name.textContent=a.name;
+   const code=document.createElement("small");code.textContent=`Codice ${a.code}`;
+   info.append(name,code);
+   const price=document.createElement("b");price.className="pdf-price";price.textContent=`€ ${Number(a.price).toFixed(2).replace(".",",")}`;
+   card.append(info,price);host.append(card);
+ });
+ $("pdfPreviewCount").textContent=`${rows.length} articoli riconosciuti`;
+ $("pdfPreview").classList.remove("hidden");
+}
+async function readPdf(){
+ const file=$("pdfFile").files[0];
+ if(!file){alert("Seleziona prima un PDF.");return;}
+ if(file.type!=="application/pdf" && !file.name.toLowerCase().endsWith(".pdf")){alert("Seleziona un file PDF.");return;}
+ $("pdfMessage").textContent="Sto leggendo il PDF…";
+ $("pdfPreview").classList.add("hidden");
+ try{
+   const lines=await extractPdfText(file);
+   pdfPreviewRows=parsePdfLines(lines);
+   if(!pdfPreviewRows.length){
+     $("pdfMessage").textContent="Non ho riconosciuto articoli. Se il PDF è una scansione/immagine, questa versione non riesce ancora a leggerlo: serve OCR.";
+     return;
+   }
+   renderPdfPreview(pdfPreviewRows);
+   $("pdfMessage").textContent="Controlla l'elenco scorrendo la finestra. Il listino non è stato ancora modificato.";
+ }catch(e){$("pdfMessage").textContent="Errore durante la lettura: "+(e.message||e);}
+}
+async function confirmPdfImport(){
+ if(!pdfPreviewRows.length)return;
+ if(!confirm(`Vuoi importare ${pdfPreviewRows.length} articoli dal PDF? Il listino attuale verrà sostituito.`))return;
+ await clearStore("articles");
+ for(const a of pdfPreviewRows)await put("articles",a);
+ await refreshArticles();
+ $("pdfMessage").textContent=`Importazione completata: ${pdfPreviewRows.length} articoli salvati sul dispositivo.`;
+ $("pdfPreview").classList.add("hidden");
+ pdfPreviewRows=[];
+ $("pdfFile").value="";
+}
+async function exportData(){const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),choices:await all("choices")};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-gestione-listini.json";a.click();URL.revokeObjectURL(a.href);}
+
+$("importCsv").onclick=importCsv;$("readPdf").onclick=readPdf;$("confirmPdfImport").onclick=confirmPdfImport;
+$("exportData").onclick=exportData;$("search").oninput=renderResults;$("startScan").onclick=startScanner;$("stopScan").onclick=stopScanner;$("newChoice").onclick=newChoice;$("saveChoice").onclick=saveChoice;
 $("addManual").onclick=()=>{const name=$("manualName").value.trim();if(!name){alert("Scrivi il nome dell'articolo.");return;}currentItems.push({code:"",name,price:"",currency:"",quantity:$("manualQty").value.trim()||"1",note:"",manual:true});$("manualAdd").classList.add("hidden");renderChoice();autosaveDraft();};
 window.addEventListener("online",status);window.addEventListener("offline",status);
 (async()=>{db=await openDb();status();await refreshArticles();await renderSaved();newChoice();if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js");}catch(e){console.warn("Service worker non registrato",e);}}})();

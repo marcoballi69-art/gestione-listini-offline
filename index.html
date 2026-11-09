@@ -7,27 +7,31 @@
 <link rel="manifest" href="./manifest.webmanifest">
 <title>Gestione Listini — Offline</title>
 <style>
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1f2937;background:#f1f5f9}
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1f2937;background:#eef4fa}
 *{box-sizing:border-box}body{margin:0 auto;max-width:820px;padding:14px}
-header,.panel{background:white;border:1px solid #dce3eb;border-radius:16px;padding:16px;margin-bottom:14px}
-h1{font-size:1.45rem;margin:0 0 4px}h2{font-size:1.1rem;margin:0 0 12px}
-small,.muted{color:#64748b}.status{font-size:.9rem;padding:8px 10px;border-radius:9px;background:#e8f1fb;margin-top:10px}
+header,.panel{background:white;border:1px solid #dce5ef;border-radius:16px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px #173b5d0a}
+h1{font-size:1.45rem;margin:0 0 4px;color:#174f86}h2{font-size:1.1rem;margin:0 0 12px;color:#174f86}
+small,.muted{color:#64748b}.status{font-size:.9rem;padding:10px 12px;border-radius:10px;background:#e8f1fb;margin-top:10px}
 .status.off{background:#fff1d6;color:#754c00}.status.on{background:#e5f6eb;color:#176438}
 label{display:block;font-weight:650;font-size:.9rem;margin:10px 0 5px}
-input,select,textarea{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font:inherit;background:white}
-textarea{min-height:75px}button{border:0;border-radius:10px;padding:12px 14px;background:#1769b0;color:white;font-weight:700;font-size:1rem;cursor:pointer;margin:6px 4px 4px 0}
-button.secondary{background:#e7edf4;color:#1e3a56}button.danger{background:#a62b2b}
+input,select,textarea{width:100%;padding:13px;border:1px solid #cbd5e1;border-radius:11px;font:inherit;background:white}
+textarea{min-height:75px}button{border:0;border-radius:11px;padding:13px 15px;background:#1769b0;color:white;font-weight:700;font-size:1rem;cursor:pointer;margin:6px 4px 4px 0;min-height:46px}
+button.secondary{background:#e7edf4;color:#1e3a56}button.success{background:#18834b}button.danger{background:#a62b2b}
 .row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}
 .article,.item{padding:12px 0;border-bottom:1px solid #e5eaf0}
 .article:last-child,.item:last-child{border:0}
 .article strong,.item strong{display:block}.price{color:#52657b;font-size:.9rem}
 .itemgrid{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center}
-#reader{width:100%;max-width:520px;margin:10px auto}
-#reader video{width:100%;border-radius:12px}
-.hidden{display:none!important}
-.pill{display:inline-block;padding:3px 8px;border-radius:20px;background:#edf2f7;font-size:.78rem}
+#reader{width:100%;max-width:520px;margin:10px auto}#reader video{width:100%;border-radius:12px}
+.hidden{display:none!important}.pill{display:inline-block;padding:3px 8px;border-radius:20px;background:#edf2f7;font-size:.78rem}
 footer{font-size:.82rem;color:#64748b;padding:8px}
-@media(max-width:520px){body{padding:9px}.panel,header{padding:13px}.row>*{min-width:100%}}
+.pdf-preview{margin-top:12px;border:1px solid #cbdceb;border-radius:12px;overflow:hidden;background:#f8fbff}
+.pdf-preview-head{padding:12px;background:#e7f1fb;color:#174f86;font-weight:700;position:sticky;top:0}
+.pdf-preview-list{max-height:52vh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 12px}
+.pdf-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 2px;border-bottom:1px solid #e2eaf2}
+.pdf-row strong{display:block;line-height:1.3}.pdf-row small{display:block;margin-top:4px}.pdf-price{white-space:nowrap;color:#1769b0;font-size:1rem}
+.note{background:#fff8e8;border-radius:10px;padding:10px;color:#76551a;font-size:.88rem}
+@media(max-width:520px){body{padding:9px}.panel,header{padding:13px}.row>*{min-width:100%}.pdf-preview-list{max-height:55vh}.pdf-row{align-items:flex-start}.pdf-price{font-size:.95rem}}
 </style>
 </head>
 <body>
@@ -39,12 +43,24 @@ footer{font-size:.82rem;color:#64748b;padding:8px}
 
 <section class="panel">
   <h2>Listino sul dispositivo</h2>
-  <p class="muted">Importa un CSV quando sei online o da un file già presente sul dispositivo. Il listino importato resta disponibile offline su questo dispositivo.</p>
+  <p class="muted">Importa un CSV oppure un PDF. Il listino importato resta disponibile su questo dispositivo.</p>
   <label for="csvFile">File listino CSV</label>
   <input id="csvFile" type="file" accept=".csv,text/csv">
   <div class="row">
-    <button id="importCsv">Importa listino</button>
+    <button id="importCsv">Importa CSV</button>
     <button id="exportData" class="secondary">Esporta dati locali</button>
+  </div>
+  <div class="divider"></div>
+  <label for="pdfFile">File listino PDF</label>
+  <input id="pdfFile" type="file" accept="application/pdf,.pdf">
+  <button id="readPdf">Leggi PDF e mostra anteprima</button>
+  <div id="pdfMessage" class="status">Seleziona un PDF per visualizzare gli articoli riconosciuti.</div>
+  <div id="pdfPreview" class="pdf-preview hidden">
+    <div class="pdf-preview-head"><span id="pdfPreviewCount">Articoli riconosciuti</span></div>
+    <div id="pdfPreviewList" class="pdf-preview-list"></div>
+    <div style="padding:10px">
+      <button id="confirmPdfImport" class="success">Conferma e importa nel listino</button>
+    </div>
   </div>
   <div id="listinoInfo" class="muted">Nessun listino caricato.</div>
 </section>
@@ -72,7 +88,7 @@ footer{font-size:.82rem;color:#64748b;padding:8px}
   <textarea id="generalNote" placeholder="Note per la scelta…"></textarea>
   <div class="row">
     <button id="newChoice" class="secondary">Nuova scelta</button>
-    <button id="saveChoice">Salva scelta</button>
+    <button id="saveChoice" class="success">Salva scelta</button>
   </div>
   <h3>Articoli scelti</h3>
   <div id="choiceItems" class="muted">Nessun articolo nella scelta.</div>
@@ -89,8 +105,9 @@ footer{font-size:.82rem;color:#64748b;padding:8px}
   <h2>Scelte salvate su questo dispositivo</h2>
   <div id="savedChoices" class="muted">Nessuna scelta salvata.</div>
 </section>
-<footer>Questo prototipo salva i dati in memoria locale del browser. Non sincronizza ancora i dati con Google e non sostituisce la versione attuale.</footer>
+<footer>Questo prototipo salva i dati in memoria locale del browser. Non sincronizza ancora i dati con Google. Per leggere il PDF è necessaria la libreria PDF.js, caricata da Internet.</footer>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="./app.js"></script>
 </body>
