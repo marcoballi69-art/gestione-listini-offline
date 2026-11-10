@@ -1,28 +1,103 @@
-const CACHE="gestione-listini-shell-v2";
-const APP=["./","./index.html","./app.js","./manifest.webmanifest"];
-const SCANNER="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js";
-self.addEventListener("install",event=>event.waitUntil((async()=>{
- const c=await caches.open(CACHE);
- await c.addAll(APP);
- try{
-   const response=await fetch(SCANNER,{mode:"no-cors",cache:"reload"});
-   if(response && (response.ok||response.type==="opaque")) await c.put(SCANNER,response);
- }catch(e){console.warn("Scanner non ancora memorizzato offline",e);}
- await self.skipWaiting();
-})()));
-self.addEventListener("activate",event=>event.waitUntil((async()=>{
- const keys=await caches.keys();await Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)));await self.clients.claim();
-})()));
-self.addEventListener("fetch",event=>{
- const req=event.request;
- if(req.method!=="GET")return;
- const url=new URL(req.url);
- if(url.origin===location.origin || req.url===SCANNER){
-   event.respondWith((async()=>{
-     const cached=await caches.match(req,{ignoreSearch:false});
-     if(cached)return cached;
-     try{const response=await fetch(req);if(response.ok){const c=await caches.open(CACHE);c.put(req,response.clone());}return response;}
-     catch(e){if(req.mode==="navigate")return caches.match("./index.html");throw e;}
-   })());
- }
+ 
+"use strict";
+
+const CACHE_NAME = "gestione-listini-v2";
+
+const APP_FILES = [
+  "./",
+  "./index.html",
+  "./app.js",
+  "./manifest.webmanifest"
+];
+
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(APP_FILES))
+      .then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(
+        keys
+          .filter(key =>
+            key.startsWith("gestione-listini-") &&
+            key !== CACHE_NAME
+          )
+          .map(key => caches.delete(key))
+      )
+    ).then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener("fetch", event => {
+  const request = event.request;
+
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+
+  // Risorse esterne: usa la cache se disponibile,
+  // altrimenti prova a scaricarle e conservarle.
+  if (url.origin !== self.location.origin) {
+    event.respondWith(
+      caches.match(request).then(cached => {
+        if (cached) return cached;
+
+        return fetch(request).then(response => {
+          if (response && (response.ok || response.type === "opaque")) {
+            const copy = response.clone();
+
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(request, copy).catch(() => {});
+            });
+          }
+
+          return response;
+        }).catch(() => new Response(
+          "Risorsa non disponibile offline.",
+          {
+            status: 503,
+            statusText: "Offline"
+          }
+        ));
+      })
+    );
+
+    return;
+  }
+
+  // File dell'app: prima cache, poi rete.
+  event.respondWith(
+    caches.match(request).then(cached => {
+      if (cached) return cached;
+
+      return fetch(request).then(response => {
+        if (response && response.ok) {
+          const copy = response.clone();
+
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(request, copy).catch(() => {});
+          });
+        }
+
+        return response;
+      }).catch(() => {
+        if (request.mode === "navigate") {
+          return caches.match("./index.html");
+        }
+
+        return new Response(
+          "File non disponibile offline.",
+          {
+            status: 503,
+            statusText: "Offline"
+          }
+        );
+      });
+    })
+  );
 });
