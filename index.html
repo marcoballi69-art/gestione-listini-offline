@@ -1,4 +1,3 @@
- 
 <!doctype html>
 <html lang="it">
 <head>
@@ -8,7 +7,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="manifest" href="./manifest.webmanifest">
 <title>Gestione Listini 2.0</title>
-
 <style>
 :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#1f2937;background:#eef4fa}
 *{box-sizing:border-box}
@@ -20,9 +18,9 @@ h3{font-size:1rem;margin:15px 0 8px}
 p{line-height:1.45}
 small,.muted{color:#64748b}
 label{display:block;font-weight:650;font-size:.9rem;margin:10px 0 5px}
-input,select,textarea{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font:inherit;background:white}
+input,select,textarea{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font:inherit;background:white;min-height:44px}
 textarea{min-height:75px;resize:vertical}
-button{border:0;border-radius:10px;padding:12px 14px;background:#1769b0;color:white;font-weight:700;font-size:.95rem;cursor:pointer;margin:5px 4px 5px 0;min-height:44px}
+button{border:0;border-radius:10px;padding:12px 14px;background:#1769b0;color:white;font-weight:700;font-size:.95rem;cursor:pointer;margin:5px 4px 5px 0;min-height:46px;touch-action:manipulation}
 button.secondary{background:#e7edf4;color:#1e3a56}
 button.success{background:#18834b}
 button.danger{background:#a62b2b}
@@ -34,12 +32,19 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .status.on{background:#e5f6eb;color:#176438}
 .hidden{display:none!important}
 .article,.item{padding:12px 0;border-bottom:1px solid #e5eaf0}
-.article:last-child,.item:last-child{border:0}
 .article strong,.item strong{display:block}
 .price{color:#52657b;font-size:.9rem;margin:4px 0}
 .itemgrid{display:grid;grid-template-columns:1fr 100px;gap:8px;align-items:center;margin-top:8px}
 #reader{width:100%;max-width:520px;margin:10px auto}
 #reader video{width:100%;border-radius:12px}
+#results{max-height:42vh;overflow-y:auto;-webkit-overflow-scrolling:touch;border-top:1px solid #e5eaf0;margin-top:10px;padding:0 8px}
+#choiceItems{max-height:340px;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 10px;border:1px solid #e5eaf0;border-radius:12px}
+#recentScanItems{max-height:230px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:8px}
+.recent-scan{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:9px 2px;border-bottom:1px solid #e5eaf0}
+.recent-scan-info{min-width:0;flex:1}
+.recent-scan-info strong{display:block;overflow-wrap:anywhere}
+.recent-scan button{margin:0;min-width:88px;padding:9px 11px;min-height:40px}
+.scan-found{font-weight:750;color:#176438}
 .pill{display:inline-block;padding:4px 9px;border-radius:20px;background:#edf2f7;font-size:.78rem}
 .note{background:#fff8e8;border-radius:10px;padding:10px;color:#76551a;font-size:.88rem}
 .divider{height:1px;background:#e5eaf0;margin:15px 0}
@@ -54,254 +59,99 @@ footer{font-size:.8rem;color:#64748b;padding:10px}
  body{padding:8px}
  header,.panel{padding:12px}
  .row>*{min-width:100%}
+ #results{max-height:38vh}
+ #choiceItems{max-height:300px}
  .pdf-preview-list{max-height:52vh}
 }
 </style>
 </head>
-
 <body>
-
-<!-- ACCESSO -->
 <section id="authGate" class="panel hidden">
   <h1>Gestione Listini 2.0</h1>
   <p class="muted">Accesso protetto all'archivio locale.</p>
   <div id="passwordSetup" class="hidden">
-    <label for="newPassword">Crea la password</label>
-    <input id="newPassword" type="password" autocomplete="new-password">
-    <label for="confirmPassword">Conferma password</label>
-    <input id="confirmPassword" type="password" autocomplete="new-password">
+    <label for="newPassword">Crea la password</label><input id="newPassword" type="password" autocomplete="new-password">
+    <label for="confirmPassword">Conferma password</label><input id="confirmPassword" type="password" autocomplete="new-password">
     <button id="createPassword" class="success">Crea password</button>
   </div>
   <div id="passwordLogin" class="hidden">
-    <label for="loginPassword">Password</label>
-    <input id="loginPassword" type="password" autocomplete="current-password">
+    <label for="loginPassword">Password</label><input id="loginPassword" type="password" autocomplete="current-password">
     <button id="unlockApp">Accedi</button>
   </div>
   <div id="authMessage" class="status"></div>
 </section>
-
-<!-- APPLICAZIONE -->
 <div id="appShell" class="hidden">
-
 <header>
-  <div class="row">
-    <div>
-      <h1>Gestione Listini 2.0</h1>
-      <div class="muted">Archivio e gestione offerte</div>
-    </div>
-    <div style="max-width:145px">
-      <label for="language">Lingua</label>
-      <select id="language">
-        <option value="it">Italiano</option>
-        <option value="en">English</option>
-      </select>
-    </div>
+  <div class="row"><div><h1>Gestione Listini 2.0</h1><div class="muted">Archivio e gestione offerte</div></div>
+    <div style="max-width:145px"><label for="language">Lingua</label><select id="language"><option value="it">Italiano</option><option value="en">English</option></select></div>
   </div>
   <div id="connection" class="status">Controllo connessione…</div>
 </header>
-
-<!-- IMPORTAZIONE LISTINO -->
 <section class="panel">
-  <h2>Importazione listino</h2>
-  <p class="muted">Importa il listino PDF, CSV oppure Excel. Gli articoli importati vengono conservati nell'archivio locale.</p>
-
-  <label for="pdfFile">Listino PDF</label>
-  <input id="pdfFile" type="file" accept="application/pdf,.pdf">
-  <button id="readPdf">Leggi PDF e mostra anteprima</button>
-  <div id="pdfMessage" class="status">Seleziona un PDF.</div>
-
-  <div id="pdfPreview" class="pdf-preview hidden">
-    <div class="pdf-preview-head">
-      <span id="pdfPreviewCount">Articoli riconosciuti</span>
-    </div>
-    <div id="pdfPreviewList" class="pdf-preview-list"></div>
-    <div style="padding:10px">
-      <button id="confirmPdfImport" class="success">Conferma importazione</button>
-      <button id="cancelPdfImport" class="secondary">Annulla</button>
-    </div>
+  <h2>Importazione listino</h2><p class="muted">Importa il listino PDF, CSV oppure Excel. Gli articoli importati vengono conservati nell'archivio locale.</p>
+  <label for="pdfFile">Listino PDF</label><input id="pdfFile" type="file" accept="application/pdf,.pdf">
+  <button id="readPdf">Leggi PDF e mostra anteprima</button><div id="pdfMessage" class="status">Seleziona un PDF.</div>
+  <div id="pdfPreview" class="pdf-preview hidden"><div class="pdf-preview-head"><span id="pdfPreviewCount">Articoli riconosciuti</span></div><div id="pdfPreviewList" class="pdf-preview-list"></div>
+    <div style="padding:10px"><button id="confirmPdfImport" class="success">Conferma importazione</button><button id="cancelPdfImport" class="secondary">Annulla</button></div>
   </div>
-
   <div class="divider"></div>
-
-  <div class="row">
-    <div>
-      <label for="csvFile">Listino CSV</label>
-      <input id="csvFile" type="file" accept=".csv,text/csv">
-      <button id="importCsv" class="secondary">Importa CSV</button>
-    </div>
-    <div>
-      <label for="excelFile">Listino Excel</label>
-      <input id="excelFile" type="file" accept=".xlsx,.xls">
-      <button id="importExcel" class="secondary">Importa Excel</button>
-    </div>
-  </div>
-
-  <div id="importMessage" class="status"></div>
-  <div id="listinoInfo" class="muted">Nessun listino caricato.</div>
+  <div class="row"><div><label for="csvFile">Listino CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"><button id="importCsv" class="secondary">Importa CSV</button></div>
+    <div><label for="excelFile">Listino Excel</label><input id="excelFile" type="file" accept=".xlsx,.xls"><button id="importExcel" class="secondary">Importa Excel</button></div></div>
+  <div id="importMessage" class="status"></div><div id="listinoInfo" class="muted">Nessun listino caricato.</div>
 </section>
-
-<!-- CLIENTE E REPARTO -->
 <section class="panel">
-  <h2>Cliente e reparto</h2>
-  <label for="customer">Cliente</label>
-  <input id="customer" type="text" list="customerOptions" placeholder="Seleziona o inserisci il cliente">
-  <datalist id="customerOptions"></datalist>
-
-  <div class="row">
-    <div>
-      <label for="department">Reparto</label>
-      <select id="department">
-        <option value="">Seleziona il reparto</option>
-      </select>
-    </div>
-    <div>
-      <label for="newDepartment">Nuovo reparto</label>
-      <input id="newDepartment" type="text" placeholder="Nome reparto">
-    </div>
-  </div>
-  <button id="addDepartment" class="secondary">Aggiungi reparto al cliente</button>
-  <div id="customerMessage" class="status"></div>
+  <h2>Cliente e reparto</h2><label for="customer">Cliente</label><input id="customer" type="text" list="customerOptions" placeholder="Seleziona o inserisci il cliente"><datalist id="customerOptions"></datalist>
+  <div class="row"><div><label for="department">Reparto (facoltativo)</label><select id="department"><option value="">Nessun reparto / seleziona</option></select></div>
+    <div><label for="newDepartment">Nuovo reparto</label><input id="newDepartment" type="text" placeholder="Nome reparto"></div></div>
+  <button id="addDepartment" class="secondary">Aggiungi reparto al cliente</button><div id="customerMessage" class="status"></div>
 </section>
-
-<!-- RICERCA E SCANNER -->
 <section class="panel">
-  <h2>Ricerca e scansione articoli</h2>
-  <label for="search">Cerca per nome o codice</label>
-  <input id="search" type="search" placeholder="Scrivi il nome o il codice articolo">
-
-  <div class="row">
-    <button id="startScan">Avvia scanner</button>
-    <button id="stopScan" class="secondary">Ferma scanner</button>
-  </div>
-  <div id="reader" class="hidden"></div>
-  <div id="scanMessage" class="status">Scanner non avviato.</div>
-  <div id="results"></div>
+  <h2>Ricerca e scansione articoli</h2><label for="search">Cerca per nome o codice</label><input id="search" type="search" placeholder="Scrivi il nome o il codice articolo">
+  <div class="row"><button id="startScan">Avvia scanner</button><button id="stopScan" class="secondary">Ferma scanner</button></div>
+  <div id="reader" class="hidden"></div><div id="scanMessage" class="status">Scanner non avviato.</div>
+  <div id="recentScanItems"></div><div id="results"></div>
 </section>
-
-<!-- SCELTA -->
 <section class="panel">
-  <h2>Scelta articoli</h2>
-
-  <div class="row">
-    <div>
-      <label for="choiceDate">Data</label>
-      <input id="choiceDate" type="date">
-    </div>
-    <div>
-      <label for="choiceNumber">Numero scelta / riferimento</label>
-      <input id="choiceNumber" type="text" placeholder="Facoltativo">
-    </div>
-  </div>
-
-  <h3>Articoli selezionati</h3>
-  <div id="choiceItems" class="muted">Nessun articolo selezionato.</div>
-
-  <div class="divider"></div>
-
-  <div id="manualAdd" class="hidden">
-    <h3>Inserimento articolo manuale</h3>
-    <p class="muted">L'articolo sarà inserito solo in questa scelta e non nel listino.</p>
-    <label for="manualName">Nome articolo</label>
-    <input id="manualName" type="text">
-    <label for="manualPrice">Prezzo</label>
-    <input id="manualPrice" type="number" min="0" step="0.01">
-    <label for="manualQty">Quantità / metraggio</label>
-    <input id="manualQty" type="text" placeholder="Es. 2 oppure 3,5 m">
-    <label for="manualNote">Nota articolo</label>
-    <textarea id="manualNote"></textarea>
-    <button id="addManual" class="success">Aggiungi articolo manuale</button>
-  </div>
-
+  <h2>Scelta articoli</h2><div class="row"><div><label for="choiceDate">Data</label><input id="choiceDate" type="date"></div>
+  <div><label for="choiceNumber">Numero scelta / riferimento</label><input id="choiceNumber" type="text" placeholder="Facoltativo"></div></div>
+  <h3>Articoli selezionati</h3><div id="choiceItems" class="muted">Nessun articolo selezionato.</div><div class="divider"></div>
+  <div id="manualAdd" class="hidden"><h3>Inserimento articolo manuale</h3><p class="muted">L'articolo sarà inserito solo in questa scelta e non nel listino.</p>
+    <label for="manualName">Nome articolo</label><input id="manualName" type="text"><label for="manualPrice">Prezzo</label><input id="manualPrice" type="number" min="0" step="0.01">
+    <label for="manualQty">Quantità / metraggio</label><input id="manualQty" type="text" placeholder="Es. 2 oppure 3,5 m"><label for="manualNote">Nota articolo</label><textarea id="manualNote"></textarea>
+    <button id="addManual" class="success">Aggiungi articolo manuale</button></div>
   <button id="showManual" class="secondary">Inserisci articolo non presente nel listino</button>
-
-  <label for="generalNote">Note generali della scelta</label>
-  <textarea id="generalNote" placeholder="Note aggiuntive..."></textarea>
+  <label for="generalNote">Note generali della scelta</label><textarea id="generalNote" placeholder="Note aggiuntive..."></textarea>
 </section>
-
-<!-- DOCUMENTO -->
 <section class="panel">
-  <h2>Documento finale</h2>
-
-  <label for="documentType">Tipo documento</label>
-  <select id="documentType">
-    <option value="summary">Riepilogo semplice</option>
-    <option value="offer">Offerta commerciale</option>
-  </select>
-
-  <label>
-    <input id="includeDetails" type="checkbox" checked style="width:auto;margin-right:7px">
-    Includi i dettagli originali degli articoli disponibili
-  </label>
-
-  <label for="commercialConditions">Condizioni commerciali</label>
-  <textarea id="commercialConditions" placeholder="Tempi, validità offerta, pagamento, consegna..."></textarea>
-
-  <div class="row">
-    <button id="saveChoice" class="success">Salva scelta</button>
-    <button id="newChoice" class="secondary">Nuova scelta</button>
-  </div>
-
-  <div class="row">
-    <button id="printDocument">Genera PDF / Stampa</button>
-    <button id="emailDocument" class="secondary">Prepara email</button>
-  </div>
-  <div id="documentMessage" class="status"></div>
+  <h2>Documento finale</h2><label for="documentType">Tipo documento</label><select id="documentType"><option value="summary">Riepilogo semplice</option><option value="offer">Offerta commerciale</option></select>
+  <label><input id="includeDetails" type="checkbox" checked style="width:auto;margin-right:7px">Includi i dettagli originali degli articoli disponibili</label>
+  <label for="commercialConditions">Condizioni commerciali</label><textarea id="commercialConditions" placeholder="Tempi, validità offerta, pagamento, consegna..."></textarea>
+  <div class="row"><button id="saveChoice" class="success">Salva scelta</button><button id="newChoice" class="secondary">Nuova scelta</button></div>
+  <div class="row"><button id="printDocument">Genera PDF / Stampa</button><button id="emailDocument" class="secondary">Prepara email</button></div><div id="documentMessage" class="status"></div>
 </section>
-
-<!-- ARCHIVIO -->
+<section class="panel"><h2>Archivio scelte salvate</h2><div id="savedChoices" class="muted"></div></section>
 <section class="panel">
-  <h2>Scelte salvate</h2>
-  <div id="savedChoices" class="muted">Nessuna scelta salvata.</div>
+  <h2>Backup e ripristino</h2><p class="muted">Esporta una copia dei dati o ripristina un backup precedente. Questa sezione è separata dalla gestione della password.</p>
+  <div class="row"><button id="exportData" class="secondary">Esporta backup JSON</button><div><label for="restoreFile">File di backup</label><input id="restoreFile" type="file" accept=".json,application/json"><button id="restoreData" class="secondary">Ripristina backup</button></div></div><div id="backupMessage" class="status"></div>
 </section>
-
-<!-- BACKUP -->
 <section class="panel">
-  <h2>Backup e ripristino</h2>
-  <p class="muted">Esporta una copia dei dati o ripristina un backup precedente.</p>
-  <div class="row">
-    <button id="exportData" class="secondary">Esporta backup JSON</button>
-    <div>
-      <label for="restoreFile">File di backup</label>
-      <input id="restoreFile" type="file" accept=".json,application/json">
-      <button id="restoreData" class="secondary">Ripristina backup</button>
-    </div>
-  </div>
-  <div id="backupMessage" class="status"></div>
-</section>
-
-<!-- IMPOSTAZIONI -->
-<section class="panel">
-  <h2>Impostazioni e sicurezza</h2>
-  <label for="idleLock">Blocco automatico per inattività</label>
-  <select id="idleLock">
-    <option value="0">Disattivato</option>
-    <option value="5">5 minuti</option>
-    <option value="10">10 minuti</option>
-    <option value="15">15 minuti</option>
-    <option value="30">30 minuti</option>
-  </select>
+  <h2>Gestione password e sicurezza</h2>
+  <label for="rememberLogin">Richiedi password a ogni apertura</label>
+  <select id="rememberLogin"><option value="yes">Sì, chiedi sempre la password</option><option value="no">No, mantieni l'accesso su questo dispositivo</option></select>
+  <p class="muted">Se scegli di mantenere l'accesso, chiunque apra l'app su questo dispositivo potrà vedere i dati finché non la blocchi manualmente o interviene il blocco per inattività.</p>
+  <label for="idleLock">Blocco automatico dell'app per inattività</label>
+  <select id="idleLock"><option value="0">Disattivato</option><option value="5">5 minuti</option><option value="10">10 minuti</option><option value="15">15 minuti</option><option value="30">30 minuti</option></select>
   <button id="saveSettings" class="secondary">Salva impostazioni</button>
-
-  <div class="divider"></div>
-  <label for="oldPassword">Password attuale</label>
-  <input id="oldPassword" type="password" autocomplete="current-password">
-  <label for="newPasswordChange">Nuova password</label>
-  <input id="newPasswordChange" type="password" autocomplete="new-password">
-  <button id="changePassword" class="secondary">Cambia password</button>
-  <button id="lockApp" class="danger">Blocca applicazione</button>
-  <div id="settingsMessage" class="status"></div>
+  <div class="divider"></div><h3>Cambia password</h3>
+  <label for="oldPassword">Password attuale</label><input id="oldPassword" type="password" autocomplete="current-password">
+  <label for="newPasswordChange">Nuova password</label><input id="newPasswordChange" type="password" autocomplete="new-password">
+  <button id="changePassword" class="secondary">Cambia password</button><button id="lockApp" class="danger">Blocca applicazione adesso</button><div id="settingsMessage" class="status"></div>
 </section>
-
-<footer>
-  I dati vengono conservati nel browser del dispositivo. Effettua regolarmente un backup JSON. Il blocco con password protegge l'accesso all'interfaccia; non equivale alla cifratura dell'archivio.
-</footer>
-
+<footer>I dati vengono conservati nel browser del dispositivo. Effettua regolarmente un backup JSON. Il blocco con password protegge l'accesso all'interfaccia; non equivale alla cifratura dell'archivio. La funzione di blocco dell'app è distinta dallo spegnimento automatico dello schermo dell'iPhone.</footer>
 </div>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="./app.js"></script>
-
 </body>
 </html>
