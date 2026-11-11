@@ -1,4 +1,3 @@
- 
 "use strict";
 
 const DB_NAME = "gestione-listini-offline";
@@ -210,6 +209,11 @@ function renderResults() {
     !query ||
     norm(a.name).includes(query) ||
     String(a.code).includes(query)
+  ).sort((a, b) =>
+    String(a.name || "").localeCompare(String(b.name || ""), "it", {
+      sensitivity: "base",
+      numeric: true
+    })
   ).slice(0, 60);
 
   if (!found.length) {
@@ -488,22 +492,34 @@ async function stopScanner() {
   $("reader").classList.add("hidden");
 }
 
+function normalizeBarcodeCode(value) {
+  return String(value == null ? "" : value)
+    .normalize("NFKC")
+    .trim()
+    .replace(/[\s-]/g, "")
+    .replace(/^0+(?=\d)/, "");
+}
+
 async function onBarcode(code) {
+  const scanned = normalizeBarcodeCode(code);
+
   const a = articles.find(x =>
-    String(x.code) === String(code) ||
-    codeKey(x.code) === codeKey(code)
+    normalizeBarcodeCode(x.code) === scanned && scanned !== ""
   );
 
   if (a) {
+    if (!await ensureCustomer()) return;
+
     addArticle(a);
-    message("scanMessage", "Trovato: " + a.name);
-  } else {
-    message("scanMessage", "Codice non trovato. Inserisci manualmente l'articolo.");
-    $("manualAdd").classList.remove("hidden");
-    $("manualName").value = "";
-    $("manualQty").value = "";
-    $("manualName").focus();
+    message("scanMessage", a.name + " — " + priceText(a));
+    return;
   }
+
+  message("scanMessage", "Codice non trovato. Inserisci manualmente l'articolo.");
+  $("manualAdd").classList.remove("hidden");
+  $("manualName").value = "";
+  $("manualQty").value = "";
+  $("manualName").focus();
 }
 
 /* IMPORTAZIONE CSV ED EXCEL */
@@ -863,9 +879,16 @@ function buildDocumentHtml() {
 
   let rows = "";
   c.items.forEach(item => {
-    const details = c.includeDetails && item.originalFields
-      ? Object.values(item.originalFields).filter(v =>
-          typeof v === "string" && v
+    const fields = item.originalFields || {};
+    const details = c.includeDetails
+      ? [
+          fields.composition,
+          fields.weight,
+          fields.height,
+          fields.fullDescription
+        ].filter((v, i, arr) =>
+          typeof v === "string" && v.trim() &&
+          arr.indexOf(v) === i
         ).join(" · ")
       : "";
 
