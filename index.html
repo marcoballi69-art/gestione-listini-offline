@@ -55,6 +55,21 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .pdf-row strong{display:block}
 .pdf-price{white-space:nowrap;color:#1769b0;font-weight:700}
 footer{font-size:.8rem;color:#64748b;padding:10px}
+/* Interfaccia mobile: controlli grandi e percorso guidato */
+button{min-height:54px;padding:14px 17px;font-size:1rem}
+input,select,textarea{min-height:50px;font-size:1rem}
+.checkline{display:flex;align-items:center;gap:10px;min-height:48px}
+.checkline input{width:22px;height:22px;min-height:22px;flex:0 0 22px}
+#reader{max-width:360px;border:2px solid #1769b0;border-radius:16px;padding:5px;background:#0b1724}
+#reader video{display:block;width:100%;max-height:250px;object-fit:cover}
+.saved-actions{align-items:stretch;margin-top:8px}
+.saved-actions>*{min-width:0}
+.preview-modal{position:fixed;inset:0;z-index:9999;background:#f4f7fb;display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.preview-modal.hidden{display:none}
+.preview-toolbar{background:white;padding:12px;border-bottom:1px solid #dce5ef;box-shadow:0 2px 8px #173b5d18}
+.preview-actions{display:flex;gap:8px}
+.preview-actions button{flex:1;margin:8px 0}
+.preview-frame{border:0;background:white;flex:1;width:100%;min-height:0}
 @media(max-width:520px){
  body{padding:8px}
  header,.panel{padding:12px}
@@ -62,6 +77,8 @@ footer{font-size:.8rem;color:#64748b;padding:10px}
  #results{max-height:38vh}
  #choiceItems{max-height:300px}
  .pdf-preview-list{max-height:52vh}
+ .preview-actions{flex-direction:column;gap:0}
+ .preview-actions button{width:100%}
 }
 </style>
 </head>
@@ -87,33 +104,23 @@ footer{font-size:.8rem;color:#64748b;padding:10px}
   </div>
   <div id="connection" class="status">Controllo connessione…</div>
 </header>
+
 <section class="panel">
-  <h2>Importazione listino</h2><p class="muted">Importa il listino PDF, CSV oppure Excel. Gli articoli importati vengono conservati nell'archivio locale.</p>
-  <label for="pdfFile">Listino PDF</label><input id="pdfFile" type="file" accept="application/pdf,.pdf">
-  <button id="readPdf">Leggi PDF e mostra anteprima</button><div id="pdfMessage" class="status">Seleziona un PDF.</div>
-  <div id="pdfPreview" class="pdf-preview hidden"><div class="pdf-preview-head"><span id="pdfPreviewCount">Articoli riconosciuti</span></div><div id="pdfPreviewList" class="pdf-preview-list"></div>
-    <div style="padding:10px"><button id="confirmPdfImport" class="success">Conferma importazione</button><button id="cancelPdfImport" class="secondary">Annulla</button></div>
-  </div>
-  <div class="divider"></div>
-  <div class="row"><div><label for="csvFile">Listino CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"><button id="importCsv" class="secondary">Importa CSV</button></div>
-    <div><label for="excelFile">Listino Excel</label><input id="excelFile" type="file" accept=".xlsx,.xls"><button id="importExcel" class="secondary">Importa Excel</button></div></div>
-  <div id="importMessage" class="status"></div><div id="listinoInfo" class="muted">Nessun listino caricato.</div>
-</section>
-<section class="panel">
-  <h2>Cliente e reparto</h2><label for="customer">Cliente</label><input id="customer" type="text" list="customerOptions" placeholder="Seleziona o inserisci il cliente"><datalist id="customerOptions"></datalist>
+  <h2>1. Scegli cliente</h2><label for="customer">Cliente</label><input id="customer" type="text" list="customerOptions" placeholder="Seleziona o inserisci il cliente"><datalist id="customerOptions"></datalist>
   <div class="row"><div><label for="department">Reparto (facoltativo)</label><select id="department"><option value="">Nessun reparto / seleziona</option></select></div>
     <div><label for="newDepartment">Nuovo reparto</label><input id="newDepartment" type="text" placeholder="Nome reparto"></div></div>
   <button id="addDepartment" class="secondary">Aggiungi reparto al cliente</button><div id="customerMessage" class="status"></div>
 </section>
 <section class="panel">
-  <h2>Ricerca e scansione articoli</h2><label for="search">Cerca per nome o codice</label><input id="search" type="search" placeholder="Scrivi il nome o il codice articolo">
-  <div class="row"><button id="startScan">Avvia scanner</button><button id="stopScan" class="secondary">Ferma scanner</button></div>
+  <h2>2. Cerca e aggiungi articoli</h2><label for="search">Cerca per nome o codice</label><input id="search" type="search" placeholder="Scrivi il nome o il codice articolo">
+  <div class="row"><button id="startScan">Apri fotocamera e scansiona</button><button id="stopScan" class="secondary">Chiudi scanner</button></div>
+  <p class="muted">Usa la fotocamera posteriore. Tieni il codice EAN orizzontale, a fuoco e ben illuminato.</p>
   <div id="reader" class="hidden"></div><div id="scanMessage" class="status">Scanner non avviato.</div>
   <div id="recentScanItems"></div><div id="results"></div>
 </section>
 <section class="panel">
-  <h2>Scelta articoli</h2><div class="row"><div><label for="choiceDate">Data</label><input id="choiceDate" type="date"></div>
-  <div><label for="choiceNumber">Numero scelta / riferimento</label><input id="choiceNumber" type="text" placeholder="Facoltativo"></div></div>
+  <h2>3. Controlla la selezione</h2><div class="row"><div><label for="choiceDate">Data</label><input id="choiceDate" type="date"></div>
+  <div><label for="choiceNumber">Numero selezione (assegnato automaticamente)</label><input id="choiceNumber" type="text" placeholder="Automatico" readonly></div></div>
   <h3>Articoli selezionati</h3><div id="choiceItems" class="muted">Nessun articolo selezionato.</div><div class="divider"></div>
   <div id="manualAdd" class="hidden"><h3>Inserimento articolo manuale</h3><p class="muted">L'articolo sarà inserito solo in questa scelta e non nel listino.</p>
     <label for="manualName">Nome articolo</label><input id="manualName" type="text"><label for="manualPrice">Prezzo</label><input id="manualPrice" type="number" min="0" step="0.01">
@@ -123,16 +130,33 @@ footer{font-size:.8rem;color:#64748b;padding:10px}
   <label for="generalNote">Note generali della scelta</label><textarea id="generalNote" placeholder="Note aggiuntive..."></textarea>
 </section>
 <section class="panel">
-  <h2>Documento finale</h2><label for="documentType">Tipo documento</label><select id="documentType"><option value="summary">Riepilogo semplice</option><option value="offer">Offerta commerciale</option></select>
-  <label><input id="includeDetails" type="checkbox" checked style="width:auto;margin-right:7px">Includi i dettagli originali degli articoli disponibili</label>
+  <h2>4. Salva e crea documento</h2><label for="documentType">Tipo documento</label><select id="documentType"><option value="summary">Riepilogo semplice</option><option value="offer">Offerta commerciale</option></select>
+  <label class="checkline"><input id="includePrices" type="checkbox" checked> Includi i prezzi nel documento e nell'email</label>
+  <label class="checkline"><input id="includeDetails" type="checkbox" checked> Includi i dettagli originali degli articoli disponibili</label>
   <label for="commercialConditions">Condizioni commerciali</label><textarea id="commercialConditions" placeholder="Tempi, validità offerta, pagamento, consegna..."></textarea>
   <div class="row"><button id="saveChoice" class="success">Salva scelta</button><button id="newChoice" class="secondary">Nuova scelta</button></div>
   <div class="row"><button id="printDocument">Genera PDF / Stampa</button><button id="emailDocument" class="secondary">Prepara email</button></div><div id="documentMessage" class="status"></div>
 </section>
-<section class="panel"><h2>Archivio scelte salvate</h2><div id="savedChoices" class="muted"></div></section>
+<section class="panel"><h2>Archivio selezioni salvate</h2>
+  <label for="savedSearch">Cerca per cliente o numero selezione</label>
+  <input id="savedSearch" type="search" placeholder="Es. Rossi oppure 12/2026">
+  <div id="savedChoices" class="muted"></div>
+</section>
 <section class="panel">
   <h2>Backup e ripristino</h2><p class="muted">Esporta una copia dei dati o ripristina un backup precedente. Questa sezione è separata dalla gestione della password.</p>
   <div class="row"><button id="exportData" class="secondary">Esporta backup JSON</button><div><label for="restoreFile">File di backup</label><input id="restoreFile" type="file" accept=".json,application/json"><button id="restoreData" class="secondary">Ripristina backup</button></div></div><div id="backupMessage" class="status"></div>
+</section>
+<section class="panel">
+  <h2>Listini e importazione articoli</h2><p class="muted">Importa il listino PDF, CSV oppure Excel. Gli articoli importati vengono conservati nell'archivio locale.</p>
+  <label for="pdfFile">Listino PDF</label><input id="pdfFile" type="file" accept="application/pdf,.pdf">
+  <button id="readPdf">Leggi PDF e mostra anteprima</button><div id="pdfMessage" class="status">Seleziona un PDF.</div>
+  <div id="pdfPreview" class="pdf-preview hidden"><div class="pdf-preview-head"><span id="pdfPreviewCount">Articoli riconosciuti</span></div><div id="pdfPreviewList" class="pdf-preview-list"></div>
+    <div style="padding:10px"><button id="confirmPdfImport" class="success">Conferma importazione</button><button id="cancelPdfImport" class="secondary">Annulla</button></div>
+  </div>
+  <div class="divider"></div>
+  <div class="row"><div><label for="csvFile">Listino CSV</label><input id="csvFile" type="file" accept=".csv,text/csv"><button id="importCsv" class="secondary">Importa CSV</button></div>
+    <div><label for="excelFile">Listino Excel</label><input id="excelFile" type="file" accept=".xlsx,.xls"><button id="importExcel" class="secondary">Importa Excel</button></div></div>
+  <div id="importMessage" class="status"></div><div id="listinoInfo" class="muted">Nessun listino caricato.</div>
 </section>
 <section class="panel">
   <h2>Gestione password e sicurezza</h2>
@@ -148,6 +172,17 @@ footer{font-size:.8rem;color:#64748b;padding:10px}
   <button id="changePassword" class="secondary">Cambia password</button><button id="lockApp" class="danger">Blocca applicazione adesso</button><div id="settingsMessage" class="status"></div>
 </section>
 <footer>I dati vengono conservati nel browser del dispositivo. Effettua regolarmente un backup JSON. Il blocco con password protegge l'accesso all'interfaccia; non equivale alla cifratura dell'archivio. La funzione di blocco dell'app è distinta dallo spegnimento automatico dello schermo dell'iPhone.</footer>
+</div>
+<div id="documentPreviewModal" class="preview-modal hidden" aria-hidden="true">
+  <div class="preview-toolbar">
+    <strong>Anteprima selezione</strong>
+    <div class="preview-actions">
+      <button id="previewPrint" class="success">Condividi / Salva PDF</button>
+      <button id="previewClose" class="secondary">Torna all'app</button>
+    </div>
+    <p class="muted">Su iPhone, nella schermata di stampa usa il pulsante di condivisione per inviare o salvare il PDF.</p>
+  </div>
+  <iframe id="documentPreviewFrame" title="Anteprima PDF" class="preview-frame"></iframe>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>

@@ -38,6 +38,11 @@ function put(name, value) {
     const r = store(name, "readwrite").put(value); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);
   });
 }
+function removeRecord(name, key) {
+  return new Promise((resolve, reject) => {
+    const r = store(name, "readwrite").delete(key); r.onsuccess = () => resolve(); r.onerror = () => reject(r.error);
+  });
+}
 function norm(v) {
   return String(v || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
@@ -48,10 +53,10 @@ function priceText(a) {
 }
 function status() {
   const online = navigator.onLine;
-  $("connection").textContent = online ? "Connesso — dati conservati sul dispositivo" : "Offline — puoi utilizzare i dati già salvati";
+  $("connection").textContent = online ? t("Connesso — dati conservati sul dispositivo") : t("Offline — puoi utilizzare i dati già salvati");
   $("connection").className = "status " + (online ? "on" : "off");
 }
-function message(id, text) { if ($(id)) $(id).textContent = text; }
+function message(id, text) { if ($(id)) $(id).textContent = t(text); }
 
 /* CLIENTI: il reparto è facoltativo */
 async function customersData() { const data = await getValue("meta", "customers"); return data ? data.value : []; }
@@ -99,7 +104,7 @@ async function ensureCustomer() {
 /* ARCHIVIO E RICERCA */
 async function refreshArticles() {
   articles = await all("articles");
-  $("listinoInfo").textContent = articles.length + " articoli salvati sul dispositivo.";
+  $("listinoInfo").textContent = articles.length + t(" articoli salvati sul dispositivo.");
   renderResults();
 }
 function renderResults() {
@@ -107,15 +112,16 @@ function renderResults() {
   host.replaceChildren();
   const found = articles.filter(a => !query || norm(a.name).includes(query) || String(a.code).includes(query))
     .sort((a,b) => String(a.name || "").localeCompare(String(b.name || ""), "it", { sensitivity:"base", numeric:true }));
-  if (!found.length) { host.textContent = "Nessun articolo trovato."; return; }
+  if (!found.length) { host.textContent = t("Nessun articolo trovato."); applyLanguage(); return; }
   found.forEach(a => {
     const div = document.createElement("div"); div.className = "article";
     const name = document.createElement("strong"); name.textContent = a.name;
-    const details = document.createElement("div"); details.className = "price"; details.textContent = "Codice " + a.code + " · " + priceText(a);
+    const details = document.createElement("div"); details.className = "price"; details.textContent = t("Codice ") + a.code + " · " + priceText(a);
     const button = document.createElement("button"); button.textContent = "Aggiungi alla scelta";
     button.onclick = async () => { if (await ensureCustomer()) addArticle(a); };
     div.append(name, details, button); host.append(div);
   });
+  applyLanguage();
 }
 function addArticle(a) {
   if (currentItems.some(x => x.code && codeKey(x.code) === codeKey(a.code))) {
@@ -129,12 +135,12 @@ function addArticle(a) {
 /* SCELTA ARTICOLI */
 function renderChoice() {
   const host = $("choiceItems"); host.replaceChildren();
-  if (!currentItems.length) { host.textContent = "Nessun articolo selezionato."; renderRecentScans(); return; }
+  if (!currentItems.length) { host.textContent = t("Nessun articolo selezionato."); renderRecentScans(); applyLanguage(); return; }
   currentItems.forEach((item,index) => {
     const div = document.createElement("div"); div.className = "item";
     const name = document.createElement("strong"); name.textContent = item.name;
     const details = document.createElement("div"); details.className = "muted";
-    details.textContent = (item.code ? "Codice " + item.code + " · " : "") + priceText(item);
+    details.textContent = (item.code ? t("Codice ") + item.code + " · " : "") + priceText(item);
     const grid = document.createElement("div"); grid.className = "itemgrid";
     const qty = document.createElement("input"); qty.value = item.quantity || "1"; qty.placeholder = "Quantità / metri";
     qty.onchange = () => { item.quantity = qty.value; autosaveDraft(); };
@@ -149,43 +155,146 @@ function renderChoice() {
     grid.append(qty,remove); div.append(name,details,grid,note); host.append(div);
   });
   renderRecentScans();
+  applyLanguage();
 }
 function choicePayload() {
-  return { id:currentChoiceId || crypto.randomUUID(), date:$("choiceDate").value, number:$("choiceNumber").value,
-    customer:$("customer").value.trim(), department:$("department").value, note:$("generalNote").value,
-    conditions:$("commercialConditions").value, documentType:$("documentType").value,
-    includeDetails:$("includeDetails").checked, items:currentItems, updatedAt:new Date().toISOString() };
-}
-async function autosaveDraft() { if (currentChoiceId) await put("choices", choicePayload()); }
-function newChoice() {
-  currentChoiceId = crypto.randomUUID(); currentItems = []; recentScans = [];
-  $("choiceDate").value = new Date().toISOString().slice(0,10); $("choiceNumber").value = "";
-  $("generalNote").value = ""; $("commercialConditions").value = ""; $("manualAdd").classList.add("hidden");
-  renderChoice(); renderRecentScans();
-}
-async function saveChoice() {
-  if (!await ensureCustomer()) return;
-  const data = choicePayload(); await put("choices",data); currentChoiceId=data.id; await renderSaved();
-  message("documentMessage","Scelta salvata sul dispositivo.");
-}
-async function renderSaved() {
-  const host=$("savedChoices"), choices=(await all("choices")).sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
-  host.replaceChildren(); if (!choices.length) { host.textContent="Nessuna scelta salvata."; return; }
-  choices.forEach(c => {
-    const div=document.createElement("div"); div.className="article";
-    const title=document.createElement("strong"); title.textContent=(c.date||"")+" — "+(c.customer||"Senza cliente")+(c.department?" / "+c.department:"");
-    const info=document.createElement("div"); info.className="muted"; info.textContent=(c.items||[]).length+" articoli";
-    const open=document.createElement("button"); open.className="secondary"; open.textContent="Apri";
-    open.onclick=async()=>{ currentChoiceId=c.id; $("choiceDate").value=c.date||""; $("choiceNumber").value=c.number||"";
-      $("customer").value=c.customer||""; await refreshDepartments(); $("department").value=c.department||"";
-      $("generalNote").value=c.note||""; $("commercialConditions").value=c.conditions||"";
-      $("documentType").value=c.documentType||"summary"; $("includeDetails").checked=c.includeDetails!==false;
-      currentItems=c.items||[]; recentScans=[]; renderChoice(); window.scrollTo({top:0,behavior:"smooth"}); };
-    div.append(title,info,open); host.append(div);
-  });
+  return {
+    id:currentChoiceId || crypto.randomUUID(),
+    date:$("choiceDate").value,
+    number:$("choiceNumber").value.trim(),
+    customer:$("customer").value.trim(),
+    department:$("department").value,
+    note:$("generalNote").value,
+    conditions:$("commercialConditions").value,
+    documentType:$("documentType").value,
+    includeDetails:$("includeDetails").checked,
+    includePrices:$("includePrices").checked,
+    items:currentItems,
+    updatedAt:new Date().toISOString()
+  };
 }
 
-/* ULTIMI TRE SCANSIONATI */
+
+async function autosaveDraft() { if (currentChoiceId) await put("choices", choicePayload()); }
+function newChoice() {
+  currentChoiceId = crypto.randomUUID();
+  currentItems = [];
+  recentScans = [];
+  $("choiceDate").value = new Date().toISOString().slice(0,10);
+  $("choiceNumber").value = "";
+  $("customer").value = "";
+  $("department").value = "";
+  $("newDepartment").value = "";
+  $("search").value = "";
+  $("generalNote").value = "";
+  $("commercialConditions").value = "";
+  $("documentType").value = "summary";
+  $("includeDetails").checked = true;
+  $("includePrices").checked = true;
+  $("manualAdd").classList.add("hidden");
+  $("reader").classList.add("hidden");
+  $("results").classList.remove("hidden");
+  renderChoice();
+  renderRecentScans();
+  refreshDepartments();
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+
+
+async function ensureSelectionNumber() {
+  const existing = $("choiceNumber").value.trim();
+  if (existing) return existing;
+  const year = new Date().getFullYear();
+  const key = "selectionSequence-" + year;
+  const saved = await all("choices");
+  const used = saved.map(c => {
+    const m = String(c.number || "").match(/^(\d+)\/(\d{4})$/);
+    return m && Number(m[2]) === year ? Number(m[1]) : 0;
+  });
+  const meta = await getValue("meta", key);
+  const next = Math.max(Number(meta && meta.value) || 0, ...used) + 1;
+  await put("meta", {key, value:next});
+  $("choiceNumber").value = next + "/" + year;
+  return $("choiceNumber").value;
+}
+
+async function saveChoice() {
+  if (!await ensureCustomer()) return;
+  if (!currentItems.length) {
+    message("documentMessage", "Aggiungi almeno un articolo prima di salvare.");
+    return;
+  }
+  await ensureSelectionNumber();
+  const data = choicePayload();
+  data.updatedAt = new Date().toISOString();
+  await put("choices", data);
+  await renderSaved();
+  const savedNumber = data.number;
+  newChoice();
+  message("documentMessage", "Selezione " + savedNumber + " salvata. Inserisci il prossimo cliente.");
+}
+
+
+async function renderSaved() {
+  const host = $("savedChoices");
+  const query = norm($("savedSearch").value);
+  const choices = (await all("choices"))
+    .filter(c => !query || norm(c.customer).includes(query) || norm(c.number).includes(query))
+    .sort((a,b) => (b.updatedAt||"").localeCompare(a.updatedAt||""));
+  host.replaceChildren();
+  if (!choices.length) {
+    host.textContent = t(query ? "Nessuna selezione corrispondente." : "Nessuna scelta salvata.");
+    applyLanguage();
+    return;
+  }
+  choices.forEach(c => {
+    const div = document.createElement("div");
+    div.className = "article saved-choice";
+    const title = document.createElement("strong");
+    title.textContent = t("Selezione N.") + " " + (c.number || "—") + " · " + (c.customer || "Senza cliente");
+    const info = document.createElement("div");
+    info.className = "muted";
+    info.textContent = (c.date || "") + (c.department ? " · " + c.department : "") + " · " + (c.items||[]).length + " " + t("articoli");
+    const actions = document.createElement("div");
+    actions.className = "row saved-actions";
+    const open = document.createElement("button");
+    open.className = "secondary";
+    open.textContent = "Apri selezione";
+    open.onclick = async () => {
+      currentChoiceId = c.id;
+      $("choiceDate").value = c.date || "";
+      $("choiceNumber").value = c.number || "";
+      $("customer").value = c.customer || "";
+      await refreshDepartments();
+      $("department").value = c.department || "";
+      $("generalNote").value = c.note || "";
+      $("commercialConditions").value = c.conditions || "";
+      $("documentType").value = c.documentType || "summary";
+      $("includeDetails").checked = c.includeDetails !== false;
+      $("includePrices").checked = c.includePrices !== false;
+      currentItems = c.items || [];
+      recentScans = [];
+      renderChoice();
+      window.scrollTo({top:0,behavior:"smooth"});
+    };
+    const del = document.createElement("button");
+    del.className = "danger";
+    del.textContent = "Elimina selezione";
+    del.onclick = async () => {
+      if (!confirm("Eliminare definitivamente la selezione " + (c.number || "") + " di " + (c.customer || "") + "?")) return;
+      await removeRecord("choices", c.id);
+      if (currentChoiceId === c.id) newChoice();
+      await renderSaved();
+      message("documentMessage", "Selezione eliminata. Il numero progressivo non verrà riutilizzato.");
+    };
+    actions.append(open, del);
+    div.append(title, info, actions);
+    host.append(div);
+  });
+  applyLanguage();
+}
+
+
 function rememberRecentScan(a) {
   recentScans = recentScans.filter(x => codeKey(x.code) !== codeKey(a.code));
   recentScans.unshift({ code:a.code, name:a.name, price:a.price, currency:a.currency || "EUR" });
@@ -312,18 +421,38 @@ function decodeEanRow(imageData) {
   return "";
 }
 function decodeLocalFrame(video) {
-  if(!localScanCanvas){localScanCanvas=document.createElement("canvas");localScanContext=localScanCanvas.getContext("2d",{willReadFrequently:true});}
-  const w=video.videoWidth,h=video.videoHeight;if(!w||!h)return "";
-  localScanCanvas.width=Math.min(w,1600);localScanCanvas.height=Math.min(h,900);
-  localScanContext.drawImage(video,0,0,localScanCanvas.width,localScanCanvas.height);
-  const cw=localScanCanvas.width,ch=localScanCanvas.height;
-  for(const fraction of [.20,.28,.36,.44,.52,.60,.68,.76,.84]){
-    const y=Math.min(ch-1,Math.floor(ch*fraction));
-    const row=localScanContext.getImageData(0,y,cw,1);
-    const found=decodeEanRow(row);if(found)return found;
+  if (!localScanCanvas) {
+    localScanCanvas = document.createElement("canvas");
+    localScanContext = localScanCanvas.getContext("2d", {willReadFrequently:true});
+  }
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return "";
+  const scale = Math.min(1, 1440 / w);
+  localScanCanvas.width = Math.round(w * scale);
+  localScanCanvas.height = Math.round(h * scale);
+  localScanContext.drawImage(video, 0, 0, localScanCanvas.width, localScanCanvas.height);
+  const cw = localScanCanvas.width, ch = localScanCanvas.height;
+  // Campiona più fasce e media 5 righe per ridurre rumore, riflessi e sfocatura.
+  for (const fraction of [.32,.37,.42,.47,.52,.57,.62,.67]) {
+    const y = Math.max(2, Math.min(ch - 3, Math.floor(ch * fraction)));
+    const sample = localScanContext.getImageData(0, y - 2, cw, 5);
+    const averaged = new Uint8ClampedArray(cw * 4);
+    for (let x = 0; x < cw; x++) {
+      let r=0,g=0,b=0,a=0;
+      for (let dy=0; dy<5; dy++) {
+        const k=(dy*cw+x)*4;
+        r+=sample.data[k]; g+=sample.data[k+1]; b+=sample.data[k+2]; a+=sample.data[k+3];
+      }
+      const k=x*4;
+      averaged[k]=r/5; averaged[k+1]=g/5; averaged[k+2]=b/5; averaged[k+3]=a/5;
+    }
+    const found = decodeEanRow({data:averaged,width:cw,height:1});
+    if (found) return found;
   }
   return "";
 }
+
+
 async function startScanner() {
   if(scanner){message("scanMessage","Scanner già attivo.");return;}
   await prepareAudio();
@@ -334,7 +463,7 @@ async function startScanner() {
     localScanVideo=document.createElement("video");
     localScanVideo.setAttribute("playsinline","");localScanVideo.setAttribute("autoplay","");localScanVideo.muted=true;
     $("reader").replaceChildren(localScanVideo);
-    localScanStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});
+    localScanStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:24,max:30}}});
     localScanVideo.srcObject=localScanStream;await localScanVideo.play();
     scanner={active:true};
     const track=localScanStream.getVideoTracks()[0];
@@ -342,7 +471,7 @@ async function startScanner() {
       const caps=track.getCapabilities?track.getCapabilities():{};
       const advanced={};
       if(caps.focusMode&&caps.focusMode.includes("continuous"))advanced.focusMode="continuous";
-      if(caps.zoom)advanced.zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,1.2));
+      if(caps.zoom)advanced.zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,1.35));
       if(Object.keys(advanced).length)await track.applyConstraints({advanced:[advanced]});
     }catch(e){}
     let detector=null;
@@ -371,7 +500,7 @@ async function startScanner() {
     };
     localScanFrame=requestAnimationFrame(tick);
     await requestScreenWakeLock();
-    message("scanMessage","Fotocamera attiva. Inquadra il codice EAN in orizzontale, con buona luce.");
+    message("scanMessage","Scanner attivo: mantieni il codice intero nell'inquadratura, orizzontale e a fuoco. Avvicina o allontana lentamente il telefono.");
   }catch(e){
     await stopScanner();
     $("results").classList.remove("hidden");
@@ -510,30 +639,77 @@ function cancelPdfImport(){pdfPreviewRows=[];$("pdfPreview").classList.add("hidd
 /* DOCUMENTO */
 function escapeHtml(value){return String(value==null?"":value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function buildDocumentHtml() {
-  const c=choicePayload(),offer=c.documentType==="offer";let rows="";
-  c.items.forEach(item=>{const f=item.originalFields||{},details=c.includeDetails?[f.composition,f.weight,f.height,f.fullDescription].filter((v,i,a)=>typeof v==="string"&&v.trim()&&a.indexOf(v)===i).join(" · "):"";
-    rows+=`<tr><td>${escapeHtml(item.code||"—")}</td><td>${escapeHtml(item.name)}${details?`<br><small>${escapeHtml(details)}</small>`:""}${item.note?`<br><small>Nota: ${escapeHtml(item.note)}</small>`:""}</td><td>${escapeHtml(item.quantity||"1")}</td><td>${escapeHtml(priceText(item))}</td></tr>`;});
-  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><title>Documento listino</title><style>body{font-family:Arial,sans-serif;padding:28px;color:#222}h1{color:#174f86;font-size:22px}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ccc;padding:9px;text-align:left;vertical-align:top}th{background:#edf3f8}small{color:#555}</style></head><body>
-  <h1>${offer?"OFFERTA COMMERCIALE":"RIEPILOGO SCELTA ARTICOLI"}</h1><p><b>Data:</b> ${escapeHtml(c.date)}</p><p><b>Riferimento:</b> ${escapeHtml(c.number)}</p><p><b>Cliente:</b> ${escapeHtml(c.customer)}</p><p><b>Reparto:</b> ${escapeHtml(c.department||"—")}</p>
-  <table><thead><tr><th>Codice</th><th>Articolo</th><th>Quantità</th><th>Prezzo</th></tr></thead><tbody>${rows}</tbody></table>
-  <h3>Note</h3><p>${escapeHtml(c.note).replace(/\n/g,"<br>")}</p>${offer?`<h3>Condizioni commerciali</h3><p>${escapeHtml(c.conditions).replace(/\n/g,"<br>")}</p>`:""}</body></html>`;
-}
-function printDocument() {
-  if(!currentItems.length){alert("Aggiungi almeno un articolo.");return;}
-  const win=window.open("","_blank");if(!win){alert("Consenti i popup per generare il documento.");return;}
-  win.document.open();win.document.write(buildDocumentHtml());win.document.close();win.onload=()=>win.print();
-}
-function emailDocument() {
-  if(!currentItems.length){alert("Aggiungi almeno un articolo.");return;}
-  const c=choicePayload(),subject=encodeURIComponent((c.documentType==="offer"?"Offerta":"Riepilogo")+" - "+c.customer);
-  const body=encodeURIComponent("Cliente: "+c.customer+"\nReparto: "+(c.department||"—")+"\nData: "+c.date+"\n\nArticoli:\n"+
-    c.items.map(i=>i.name+" - "+priceText(i)+" - Quantità: "+i.quantity).join("\n")+"\n\nNote: "+c.note+"\nCondizioni: "+c.conditions+"\n\nAllega il PDF generato dall'app.");
-  window.location.href="mailto:?subject="+subject+"&body="+body;
+  const c = choicePayload();
+  let rows = "";
+  c.items.forEach(item => {
+    const f = item.originalFields || {};
+    const detailsRaw = c.includeDetails
+      ? [f.composition, f.weight, f.height, f.fullDescription]
+      : [];
+    const seen = new Set([norm(item.name)]);
+    const details = detailsRaw.filter(v => {
+      if (typeof v !== "string" || !v.trim()) return false;
+      const key = norm(v);
+      if (!key || seen.has(key) || (norm(item.name) && key.includes(norm(item.name)))) return false;
+      seen.add(key);
+      return true;
+    }).join(" · ");
+    rows += `<tr><td>${escapeHtml(item.name)}${details ? `<br><small>${escapeHtml(details)}</small>` : ""}${item.note ? `<br><small><b>${t("Nota:")}</b> ${escapeHtml(item.note)}</small>` : ""}</td><td>${escapeHtml(item.quantity || "1")}</td>${c.includePrices ? `<td>${escapeHtml(priceText(item))}</td>` : ""}</tr>`;
+  });
+  const title = t("SELEZIONE N.") + " " + (c.number || "—");
+  return `<!doctype html><html lang="${currentLanguage}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title>
+  <style>
+  body{font-family:Arial,sans-serif;padding:24px;color:#222}h1{color:#174f86;font-size:22px;margin:0 0 18px}
+  .meta{line-height:1.55}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #ccc;padding:9px;text-align:left;vertical-align:top}
+  th{background:#edf3f8}small{color:#555}.notes{white-space:pre-wrap}
+  @media print{body{padding:0}.no-print{display:none!important}}
+  </style></head><body>
+  <h1>${escapeHtml(title)}</h1>
+  <div class="meta"><b>${t("Cliente:")}</b> ${escapeHtml(c.customer)}<br><b>${t("Data:")}</b> ${escapeHtml(c.date)}${c.department ? `<br><b>${t("Reparto:")}</b> ${escapeHtml(c.department)}` : ""}</div>
+  <table><thead><tr><th>${t("Articolo")}</th><th>${t("Quantità")}</th>${c.includePrices ? `<th>${t("Prezzo")}</th>` : ""}</tr></thead><tbody>${rows}</tbody></table>
+  ${c.note ? `<h3>${t("Note generali")}</h3><p class="notes">${escapeHtml(c.note)}</p>` : ""}
+  </body></html>`;
 }
 
-/* BACKUP */
+
+async function printDocument() {
+  if (!currentItems.length) { alert(t("Aggiungi almeno un articolo.")); return; }
+  if (!$("customer").value.trim()) { alert(t("Seleziona prima il cliente.")); $("customer").focus(); return; }
+  await ensureSelectionNumber();
+  $("documentPreviewFrame").srcdoc = buildDocumentHtml();
+  $("documentPreviewModal").classList.remove("hidden");
+  $("documentPreviewModal").setAttribute("aria-hidden","false");
+}
+
+
+async function emailDocument() {
+  if (!currentItems.length) { alert(t("Aggiungi almeno un articolo.")); return; }
+  if (!$("customer").value.trim()) { alert(t("Seleziona prima il cliente.")); $("customer").focus(); return; }
+  await ensureSelectionNumber();
+  const c = choicePayload();
+  const subject = encodeURIComponent(t("Selezione N. ") + c.number + " - " + c.customer);
+  const lines = c.items.map(i => {
+    const bits = [i.name, t("Quantità:") + " " + (i.quantity || "1")];
+    if (c.includePrices) bits.push(priceText(i));
+    if (i.note && i.note.trim()) bits.push(t("Nota:") + " " + i.note.trim());
+    return bits.join(" | ");
+  });
+  const body = encodeURIComponent(
+    t("Selezione N. ") + c.number +
+    "\n" + t("Cliente:") + " " + c.customer +
+    (c.department ? "\n" + t("Reparto:") + " " + c.department : "") +
+    "\n" + t("Data:") + " " + c.date + "\n\n" + t("Articoli:") + "\n" + lines.join("\n") +
+    (c.note ? "\n\n" + t("Note generali") + ": " + c.note : "") +
+    "\n\n" + t("Per allegare il PDF, genera il documento e usa Condividi / Salva PDF.")
+  );
+  window.location.href = "mailto:?subject=" + subject + "&body=" + body;
+}
+
+
 async function exportData() {
-  const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),choices:await all("choices"),customers:await customersData()};
+  const metaRows = await all("meta");
+  const selectionSequences = metaRows.filter(x => String(x.key || "").startsWith("selectionSequence-"));
+  const payload={exportedAt:new Date().toISOString(),articles:await all("articles"),choices:await all("choices"),customers:await customersData(),selectionSequences};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
   a.href=url;a.download="backup-gestione-listini.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message("backupMessage","Backup esportato.");
 }
@@ -542,6 +718,7 @@ async function restoreData() {
   try{const p=JSON.parse(await file.text());if(Array.isArray(p.articles))await mergeArticles(p.articles);
     if(Array.isArray(p.choices))for(const c of p.choices)await put("choices",c);
     if(Array.isArray(p.customers))await saveCustomers(p.customers);
+    if(Array.isArray(p.selectionSequences))for(const sequence of p.selectionSequences)if(sequence&&String(sequence.key||"").startsWith("selectionSequence-"))await put("meta",sequence);
     await refreshCustomers();await renderSaved();message("backupMessage","Backup ripristinato. I dati già presenti sono stati conservati.");}
   catch(e){message("backupMessage","Backup non valido: "+e.message);}
 }
@@ -600,10 +777,283 @@ async function loadSettings() {
   const remember=await getValue("meta","rememberLogin");if(remember)$("rememberLogin").value=remember.value;
   const language=await getValue("meta","language");if(language){currentLanguage=language.value;$("language").value=currentLanguage;}
 }
-async function saveLanguage() {
-  currentLanguage=$("language").value;await put("meta",{key:"language",value:currentLanguage});
-  message("settingsMessage",currentLanguage==="en"?"Language preference saved. Full translation is not yet available.":"Preferenza lingua salvata.");
+
+const EN = {
+  "Gestione Listini 2.0":"Price List Manager 2.0",
+  "Archivio e gestione offerte":"Selections and document manager",
+  "Lingua":"Language",
+  "Italiano":"Italian",
+  "English":"English",
+  "Connesso — dati conservati sul dispositivo":"Online — data stored on this device",
+  "Offline — puoi utilizzare i dati già salvati":"Offline — saved data remains available",
+  "1. Scegli cliente":"1. Choose customer",
+  "Cliente e reparto":"Customer and department",
+  "Cliente":"Customer",
+  "Seleziona o inserisci il cliente":"Select or enter a customer",
+  "Reparto (facoltativo)":"Department (optional)",
+  "Nessun reparto / seleziona":"No department / select",
+  "Nuovo reparto":"New department",
+  "Nome reparto":"Department name",
+  "Aggiungi reparto al cliente":"Add department to customer",
+  "2. Cerca e aggiungi articoli":"2. Find and add items",
+  "Ricerca e scansione articoli":"Item search and scanning",
+  "Cerca per nome o codice":"Search by name or code",
+  "Scrivi il nome o il codice articolo":"Enter item name or code",
+  "Apri fotocamera e scansiona":"Open camera and scan",
+  "Chiudi scanner":"Close scanner",
+  "Usa la fotocamera posteriore. Tieni il codice EAN orizzontale, a fuoco e ben illuminato.":"Use the rear camera. Keep the EAN barcode horizontal, in focus and well lit.",
+  "Scanner non avviato.":"Scanner not started.",
+  "3. Controlla la selezione":"3. Review selection",
+  "Scelta articoli":"Selected items",
+  "Data":"Date",
+  "Numero selezione (assegnato automaticamente)":"Selection number (assigned automatically)",
+  "Automatico":"Automatic",
+  "Articoli selezionati":"Selected items",
+  "Nessun articolo selezionato.":"No items selected.",
+  "Inserimento articolo manuale":"Add item manually",
+  "L'articolo sarà inserito solo in questa scelta e non nel listino.":"This item will be added only to this selection, not to the price list.",
+  "Nome articolo":"Item name",
+  "Prezzo":"Price",
+  "Quantità / metraggio":"Quantity / length",
+  "Nota articolo":"Item note",
+  "Aggiungi articolo manuale":"Add manual item",
+  "Inserisci articolo non presente nel listino":"Add an item not in the price list",
+  "Note generali della scelta":"Selection notes",
+  "Note aggiuntive...":"Additional notes...",
+  "4. Salva e crea documento":"4. Save and create document",
+  "Documento finale":"Final document",
+  "Tipo documento":"Document type",
+  "Riepilogo semplice":"Simple summary",
+  "Offerta commerciale":"Commercial offer",
+  "Includi i prezzi nel documento e nell'email":"Include prices in the document and email",
+  "Includi i dettagli originali degli articoli disponibili":"Include available original item details",
+  "Condizioni commerciali":"Commercial terms",
+  "Tempi, validità offerta, pagamento, consegna...":"Timing, offer validity, payment, delivery...",
+  "Salva scelta":"Save selection",
+  "Nuova scelta":"New selection",
+  "Genera PDF / Stampa":"Create PDF / Print",
+  "Prepara email":"Prepare email",
+  "Archivio selezioni salvate":"Saved selections",
+  "Cerca per cliente o numero selezione":"Search by customer or selection number",
+  "Es. Rossi oppure 12/2026":"E.g. Smith or 12/2026",
+  "Listini e importazione articoli":"Price lists and item import",
+  "Importazione listino":"Import price list",
+  "Importa il listino PDF, CSV oppure Excel. Gli articoli importati vengono conservati nell'archivio locale.":"Import a PDF, CSV or Excel price list. Imported items are stored locally.",
+  "Listino PDF":"PDF price list",
+  "Leggi PDF e mostra anteprima":"Read PDF and show preview",
+  "Seleziona un PDF.":"Select a PDF.",
+  "Articoli riconosciuti":"Recognized items",
+  "Conferma importazione":"Confirm import",
+  "Annulla":"Cancel",
+  "Listino CSV":"CSV price list",
+  "Importa CSV":"Import CSV",
+  "Listino Excel":"Excel price list",
+  "Importa Excel":"Import Excel",
+  "Nessun listino caricato.":"No price list loaded.",
+  "Backup e ripristino":"Backup and restore",
+  "Esporta una copia dei dati o ripristina un backup precedente. Questa sezione è separata dalla gestione della password.":"Export a copy of your data or restore a previous backup. This section is separate from password management.",
+  "Esporta backup JSON":"Export JSON backup",
+  "File di backup":"Backup file",
+  "Ripristina backup":"Restore backup",
+  "Gestione password e sicurezza":"Password and security",
+  "Richiedi password a ogni apertura":"Require password every time the app opens",
+  "Sì, chiedi sempre la password":"Yes, always ask for password",
+  "No, mantieni l'accesso su questo dispositivo":"No, keep me signed in on this device",
+  "Se scegli di mantenere l'accesso, chiunque apra l'app su questo dispositivo potrà vedere i dati finché non la blocchi manualmente o interviene il blocco per inattività.":"If you stay signed in, anyone opening the app on this device can see its data until you lock it or the inactivity lock activates.",
+  "Blocco automatico dell'app per inattività":"Automatically lock the app after inactivity",
+  "Disattivato":"Disabled",
+  "5 minuti":"5 minutes",
+  "10 minuti":"10 minutes",
+  "15 minuti":"15 minutes",
+  "30 minuti":"30 minutes",
+  "Salva impostazioni":"Save settings",
+  "Cambia password":"Change password",
+  "Password attuale":"Current password",
+  "Nuova password":"New password",
+  "Blocca applicazione adesso":"Lock app now",
+  "I dati vengono conservati nel browser del dispositivo. Effettua regolarmente un backup JSON. Il blocco con password protegge l'accesso all'interfaccia; non equivale alla cifratura dell'archivio. La funzione di blocco dell'app è distinta dallo spegnimento automatico dello schermo dell'iPhone.":"Data is stored in this device's browser. Export JSON backups regularly. The password protects access to the interface; it does not encrypt the archive. App locking is separate from the iPhone's automatic screen lock.",
+  "Anteprima selezione":"Selection preview",
+  "Condividi / Salva PDF":"Share / Save PDF",
+  "Torna all'app":"Back to app",
+  "Su iPhone, nella schermata di stampa usa il pulsante di condivisione per inviare o salvare il PDF.":"On iPhone, use the share button in the print screen to send or save the PDF.",
+  "Aggiungi alla scelta":"Add to selection",
+  "Codice":"Code",
+  "Quantità:":"Quantity:",
+  "Nota:":"Note:",
+  "Prezzo non indicato":"Price not specified",
+  "Nessun articolo trovato.":"No items found.",
+  "Nessuna scelta salvata.":"No saved selections.",
+  "Nessuna selezione corrispondente.":"No matching selections.",
+  "Apri selezione":"Open selection",
+  "Elimina selezione":"Delete selection",
+  "Selezione":"Selection",
+  "Senza cliente":"No customer",
+  "articoli":"items",
+  "Aggiungi almeno un articolo.":"Add at least one item.",
+  "Seleziona prima il cliente.":"Select a customer first.",
+  "Aggiungi almeno un articolo prima di salvare.":"Add at least one item before saving.",
+  "Inserisci prima il cliente.":"Enter the customer first.",
+  "Scrivi il nome del reparto.":"Enter the department name.",
+  "Cliente e reparto salvati.":"Customer and department saved.",
+  "Seleziona o inserisci il cliente prima di aggiungere articoli.":"Select or enter a customer before adding items.",
+  "Cliente selezionato. Reparto facoltativo.":"Customer selected. Department is optional.",
+  "Cliente e reparto selezionati.":"Customer and department selected.",
+  "Scelta salvata sul dispositivo.":"Selection saved on this device.",
+  "Selezione eliminata. Il numero progressivo non verrà riutilizzato.":"Selection deleted. Its sequence number will not be reused.",
+  "Selezione salvata. Inserisci il prossimo cliente.":"Selection saved. Enter the next customer.",
+  "Accesso protetto all'archivio locale.":"Secure access to the local archive.",
+  "Crea la password":"Create password",
+  "Conferma password":"Confirm password",
+  "Crea password":"Create password",
+  "Accedi":"Sign in",
+  "Archivio e gestione offerte":"Selections and document manager",
+  "Controllo connessione…":"Checking connection…",
+  "Nuovo reparto":"New department",
+  "Aggiungi reparto al cliente":"Add department to customer",
+  "Condizioni commerciali":"Commercial terms",
+  "Tempi, validità offerta, pagamento, consegna...":"Timing, offer validity, payment, delivery...",
+  "Rimuovi":"Remove",
+  "Cancella":"Delete",
+  "Ultimi 3 articoli scansionati":"Last 3 scanned items",
+  "Nota articolo":"Item note",
+  "Quantità / metri":"Quantity / length",
+  "Prezzo non indicato":"Price not specified",
+  "Scanner già attivo.":"Scanner already active.",
+  "Scanner fermato.":"Scanner stopped.",
+  "Fotocamera attiva. Inquadra il codice EAN in orizzontale, con buona luce.":"Camera active. Frame the EAN barcode horizontally in good light.",
+  "Codice non trovato. Inserisci manualmente l'articolo.":"Code not found. Enter the item manually.",
+  "Seleziona o inserisci il cliente prima di aggiungere articoli.":"Select or enter a customer before adding items.",
+  "Articolo già presente nella scelta: ":"Item already in selection: ",
+  "Selezione salvata sul dispositivo.":"Selection saved on this device.",
+  "Impossibile aprire la stampa su questo browser.":"Unable to open printing on this browser.",
+  "Importa il listino PDF, CSV oppure Excel. Gli articoli importati vengono conservati nell'archivio locale.":"Import a PDF, CSV or Excel price list. Imported items are stored locally.",
+  "Esporta una copia dei dati o ripristina un backup precedente. Questa sezione è separata dalla gestione della password.":"Export a copy of your data or restore a previous backup. This section is separate from password management.",
+  "Password":"Password",
+  "Codice ":"Code ",
+  "articoli importati o aggiornati.":"items imported or updated.",
+  "articoli riconosciuti":"recognized items",
+  "articoli salvati sul dispositivo.":"items stored on this device.",
+  "Controlla l'anteprima prima di importare.":"Review the preview before importing.",
+  "Importazione annullata.":"Import cancelled.",
+  "Impossibile caricare il motore OCR.":"Unable to load the OCR engine.",
+  "Inserisci il nome dell'articolo.":"Enter the item name.",
+  "La fotocamera richiede una pagina HTTPS.":"The camera requires an HTTPS page.",
+  "Lettore Excel non disponibile. Apri l'app online una volta.":"Excel reader unavailable. Open the app online once.",
+  "Lettore PDF non disponibile.":"PDF reader unavailable.",
+  "Lettura del PDF in corso…":"Reading PDF…",
+  "Nessun articolo riconosciuto.":"No items recognized.",
+  "Nessun articolo riconosciuto. Controlla il PDF e la qualità della scansione.":"No items recognized. Check the PDF and scan quality.",
+  "Seleziona prima un PDF.":"Select a PDF first.",
+  "Seleziona un file CSV.":"Select a CSV file.",
+  "Seleziona un file Excel.":"Select an Excel file.",
+  "Scanner attivo: mantieni il codice intero nell'inquadratura, orizzontale e a fuoco. Avvicina o allontana lentamente il telefono.":"Scanner active: keep the full barcode in frame, horizontal and in focus. Slowly move the phone closer or farther away.",
+  "Selezione N.":"Selection No.",
+  "items":"items",
+  "articoli":"items",
+  "Ultimi 3 articoli scansionati":"Last 3 scanned items",
+  "Interfaccia italiana selezionata.":"Italian interface selected.",
+  "English interface selected.":"English interface selected.",
+  "Inserisci prima il cliente.":"Enter the customer first.",
+  "Articolo già presente nella scelta: ":"Item already in selection: ",
+  "Codice non trovato. Inserisci manualmente l'articolo.":"Code not found. Enter the item manually.",
+  "accesso non disponibile":"access unavailable",
+  "Backup esportato.":"Backup exported.",
+  "Backup ripristinato. I dati già presenti sono stati conservati.":"Backup restored. Existing data has been preserved.",
+  "Backup non valido: ":"Invalid backup: ",
+  "La password deve contenere almeno 6 caratteri.":"Password must contain at least 6 characters.",
+  "Le password non coincidono.":"Passwords do not match.",
+  "Password non corretta.":"Incorrect password.",
+  "La nuova password deve avere almeno 6 caratteri.":"The new password must contain at least 6 characters.",
+  "Password attuale non corretta.":"Current password is incorrect.",
+  "Password aggiornata.":"Password updated.",
+  "Impostazioni salvate.":"Settings saved.",
+  "articoli importati o aggiornati.":"items imported or updated.",
+  "Errore inizializzazione archivio: ":"Archive initialization error: ",
+  "Errore fotocamera: ":"Camera error: ",
+  "Errore CSV: ":"CSV error: ",
+  "Errore Excel: ":"Excel error: ",
+  "Errore PDF: ":"PDF error: ",
+  "Selezione ":"Selection ",
+  " · ":" · ",
+  " articoli salvati sul dispositivo.":" items stored on this device.",
+  " salvata. Inserisci il prossimo cliente.":" saved. Enter the next customer.",
+  "SELEZIONE N.":"SELECTION NO.",
+  "Cliente:":"Customer:",
+  "Data:":"Date:",
+  "Reparto:":"Department:",
+  "Articolo":"Item",
+  "Quantità":"Quantity",
+  "Note generali":"General notes",
+  "Nota:":"Note:",
+  "Prezzo":"Price",
+  "Selezione N. ":"Selection No. ",
+  "Articoli:":"Items:",
+  "Per allegare il PDF, genera il documento e usa Condividi / Salva PDF.":"To attach the PDF, create it and use Share / Save PDF.",
+  "Quantità:":"Quantity:",
+  "Articoli:":"Items:",
+};
+function t(value) {
+  if (currentLanguage !== "en") return value;
+  if (EN[value]) return EN[value];
+  const prefixes = [
+    ["TROVATO: ", "FOUND: "],
+    ["GIÀ PRESENTE: ", "ALREADY IN SELECTION: "],
+    ["Errore fotocamera: ", "Camera error: "],
+    ["Errore CSV: ", "CSV error: "],
+    ["Errore Excel: ", "Excel error: "],
+    ["Errore PDF: ", "PDF error: "],
+    ["Lettura pagina ", "Reading page "],
+    ["Importare o aggiornare ", "Import or update "],
+    ["Codice ", "Code "],
+    ["Selezione ", "Selection "],
+    ["Articolo già presente nella scelta: ", "Item already in selection: "],
+    ["n articoli", "n items"]
+  ];
+  for (const [from,to] of prefixes) if (String(value).startsWith(from)) return to + String(value).slice(from.length);
+  const suffixes = [
+    [" articoli salvati sul dispositivo.", " items stored on this device."],
+    [" articoli importati o aggiornati.", " items imported or updated."],
+    [" salvata. Inserisci il prossimo cliente.", " saved. Enter the next customer."]
+  ];
+  for (const [from,to] of suffixes) if (String(value).endsWith(from)) return String(value).slice(0,-from.length) + to;
+  return value;
 }
+function applyLanguage() {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!node.__italianText) node.__italianText = node.nodeValue;
+    const original = node.__italianText;
+    const trimmed = original.trim();
+    if (!trimmed) continue;
+    const translated = currentLanguage === "en" ? (EN[trimmed] || trimmed) : trimmed;
+    const leading = original.match(/^\s*/)?.[0] || "";
+    const trailing = original.match(/\s*$/)?.[0] || "";
+    node.nodeValue = leading + translated + trailing;
+  }
+  const placeholders = {
+    "Seleziona o inserisci il cliente":"Select or enter a customer",
+    "Nome reparto":"Department name",
+    "Scrivi il nome o il codice articolo":"Enter item name or code",
+    "Automatico":"Automatic",
+    "Note aggiuntive...":"Additional notes...",
+    "Tempi, validità offerta, pagamento, consegna...":"Timing, offer validity, payment, delivery...",
+    "Es. Rossi oppure 12/2026":"E.g. Smith or 12/2026"
+  };
+  document.querySelectorAll("[placeholder]").forEach(el => {
+    if (!el.__italianPlaceholder) el.__italianPlaceholder = el.getAttribute("placeholder");
+    const original = el.__italianPlaceholder;
+    el.setAttribute("placeholder", currentLanguage === "en" ? (placeholders[original] || original) : original);
+  });
+}
+
+async function saveLanguage() {
+  currentLanguage = $("language").value;
+  await put("meta", {key:"language",value:currentLanguage});
+  applyLanguage();
+  message("settingsMessage", currentLanguage === "en" ? "English interface selected." : "Interfaccia italiana selezionata.");
+}
+
 
 /* EVENTI E AVVIO */
 $("createPassword").onclick=createPassword;$("unlockApp").onclick=unlockApp;
@@ -616,6 +1066,9 @@ $("addManual").onclick=addManual;
 $("readPdf").onclick=readPdf;$("confirmPdfImport").onclick=confirmPdfImport;$("cancelPdfImport").onclick=cancelPdfImport;
 $("importCsv").onclick=importCsv;$("importExcel").onclick=importExcel;
 $("saveChoice").onclick=saveChoice;$("newChoice").onclick=newChoice;$("printDocument").onclick=printDocument;$("emailDocument").onclick=emailDocument;
+$("savedSearch").oninput=renderSaved;
+$("previewClose").onclick=()=>{$("documentPreviewModal").classList.add("hidden");$("documentPreviewModal").setAttribute("aria-hidden","true");};
+$("previewPrint").onclick=()=>{const frame=$("documentPreviewFrame");try{frame.contentWindow.focus();frame.contentWindow.print();}catch(e){message("documentMessage","Impossibile aprire la stampa su questo browser.");}};
 $("exportData").onclick=exportData;$("restoreData").onclick=restoreData;
 $("saveSettings").onclick=saveSettings;$("changePassword").onclick=changePassword;$("lockApp").onclick=lockApp;$("language").onchange=saveLanguage;
 window.addEventListener("online",status);window.addEventListener("offline",status);
@@ -625,7 +1078,7 @@ window.addEventListener("online",status);window.addEventListener("offline",statu
 document.addEventListener("visibilitychange",async()=>{if(document.visibilityState==="visible"&&scanner&&"wakeLock"in navigator)await requestScreenWakeLock();});
 (async function init(){
   try{
-    db=await openDb();status();await loadSettings();
+    db=await openDb();status();await loadSettings();applyLanguage();
     const auth=await getValue("meta","auth");
     if(auth){
       const remember=await getValue("meta","rememberLogin");
@@ -633,6 +1086,6 @@ document.addEventListener("visibilitychange",async()=>{if(document.visibilitySta
       else{$("authGate").classList.remove("hidden");$("passwordLogin").classList.remove("hidden");}
     }else{$("authGate").classList.remove("hidden");$("passwordSetup").classList.remove("hidden");}
     newChoice();
-    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=4");}catch(e){console.warn("Service worker non registrato",e);}}
+    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=6");}catch(e){console.warn("Service worker non registrato",e);}}
   }catch(e){alert("Errore inizializzazione archivio: "+e.message);}
 })();
