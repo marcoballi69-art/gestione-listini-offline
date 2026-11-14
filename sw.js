@@ -1,10 +1,9 @@
 "use strict";
-const CACHE_NAME = "gestione-listini-v3";
+const CACHE_NAME = "gestione-listini-v5";
 const APP_FILES = ["./","./index.html","./app.js","./manifest.webmanifest"];
 const EXTERNAL_FILES = [
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
-  "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js",
   "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
 ];
 self.addEventListener("install", event => {

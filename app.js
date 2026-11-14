@@ -248,39 +248,142 @@ async function releaseScreenWakeLock() {
   screenWakeLock=null;
 }
 
-/* SCANNER */
+/* SCANNER OFFLINE: BarcodeDetector quando disponibile + decoder EAN locale */
+let localScanStream = null, localScanVideo = null, localScanFrame = 0;
+let localScanCanvas = null, localScanContext = null, localScanBusy = false, localScanLastFrameAt = 0;
+const EAN_L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101111","0111011","0110111","0001011"];
+const EAN_G = ["0100111","0110011","0011011","0100001","0011101","0111001","0000101","0010001","0001001","0010111"];
+const EAN_R = ["1110010","1100110","1101100","1000010","1011100","1001110","1010000","1000100","1001000","1110100"];
+const EAN_PARITY = ["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
+function decodeEanRow(imageData) {
+  const {data,width,height}=imageData, y=Math.max(0,Math.min(height-1,Math.floor(height/2)));
+  const gray=new Uint8Array(width), hist=new Uint32Array(256);
+  for(let x=0;x<width;x++){const k=(y*width+x)*4,v=(data[k]*0.299+data[k+1]*0.587+data[k+2]*0.114)|0;gray[x]=v;hist[v]++;}
+  let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];
+  let sumB=0,wB=0,max=-1,threshold=127;
+  for(let i=0;i<256;i++){wB+=hist[i];if(!wB)continue;const wF=width-wB;if(!wF)break;sumB+=i*hist[i];const between=wB*wF*(sumB/wB-(sum-sumB)/wF)**2;if(between>max){max=between;threshold=i;}}
+  const bits=gray.map(v=>v<=threshold?1:0), runs=[];
+  let bit=bits[0],runStart=0;
+  for(let x=1;x<=width;x++){if(x===width||bits[x]!==bit){runs.push({bit,start:runStart,len:x-runStart});if(x<width){bit=bits[x];runStart=x;}}}
+  const near=(a,b,t)=>Math.abs(a-b)<=Math.max(1,b*t);
+  for(let i=0;i<runs.length-2;i++){
+    if(runs[i].bit!==1||runs[i+1].bit!==0||runs[i+2].bit!==1)continue;
+    const module=(runs[i].len+runs[i+1].len+runs[i+2].len)/3;
+    if(module<1.15||!near(runs[i].len,module,.48)||!near(runs[i+1].len,module,.48)||!near(runs[i+2].len,module,.48))continue;
+    const x0=runs[i].start;
+
+    // EAN-8: 67 moduli (101 + 4 cifre + 01010 + 4 cifre + 101).
+    if(x0+67*module<=width){
+      let p8="";
+      for(let n=0;n<67;n++){const x=Math.min(width-1,Math.floor(x0+(n+.5)*module));p8+=bits[x]?"1":"0";}
+      if(p8.slice(0,3)==="101"&&p8.slice(31,36)==="01010"&&p8.slice(64,67)==="101"){
+        const digits8=[];let valid8=true;
+        for(let d=0;d<4;d++){const n=EAN_L.indexOf(p8.slice(3+d*7,10+d*7));if(n<0){valid8=false;break;}digits8.push(n);}
+        if(valid8){
+          for(let d=0;d<4;d++){const n=EAN_R.indexOf(p8.slice(36+d*7,43+d*7));if(n<0){valid8=false;break;}digits8.push(n);}
+        }
+        if(valid8){
+          const sum8=digits8.slice(0,7).reduce((s,v,i)=>s+v*(i%2===0?3:1),0);
+          if((10-sum8%10)%10===digits8[7])return digits8.join("");
+        }
+      }
+    }
+
+    // EAN-13.
+    const total=95*module;
+    if(x0+total>width)continue;
+    let pattern="";
+    for(let n=0;n<95;n++){const x=Math.min(width-1,Math.floor(x0+(n+.5)*module));pattern+=bits[x]?"1":"0";}
+    if(pattern.slice(0,3)!=="101"||pattern.slice(45,50)!=="01010"||pattern.slice(92,95)!=="101")continue;
+    const left=[],right=[];let parity="";
+    for(let d=0;d<6;d++){
+      const p=pattern.slice(3+d*7,10+d*7);
+      let found=-1,kind="";
+      for(let n=0;n<10;n++){if(p===EAN_L[n]){found=n;kind="L";break;}if(p===EAN_G[n]){found=n;kind="G";break;}}
+      if(found<0){left.length=0;break;}left.push(found);parity+=kind;
+    }
+    if(left.length!==6)continue;
+    const first=EAN_PARITY.indexOf(parity);if(first<0)continue;
+    for(let d=0;d<6;d++){const p=pattern.slice(50+d*7,57+d*7),n=EAN_R.indexOf(p);if(n<0){right.length=0;break;}right.push(n);}
+    if(right.length!==6)continue;
+    const digits=[first,...left,...right],sumCheck=digits.slice(0,12).reduce((s,v,i)=>s+v*(i%2===0?1:3),0),check=(10-sumCheck%10)%10;
+    if(check===digits[12])return digits.join("");
+  }
+  return "";
+}
+function decodeLocalFrame(video) {
+  if(!localScanCanvas){localScanCanvas=document.createElement("canvas");localScanContext=localScanCanvas.getContext("2d",{willReadFrequently:true});}
+  const w=video.videoWidth,h=video.videoHeight;if(!w||!h)return "";
+  localScanCanvas.width=Math.min(w,1600);localScanCanvas.height=Math.min(h,900);
+  localScanContext.drawImage(video,0,0,localScanCanvas.width,localScanCanvas.height);
+  const cw=localScanCanvas.width,ch=localScanCanvas.height;
+  for(const fraction of [.20,.28,.36,.44,.52,.60,.68,.76,.84]){
+    const y=Math.min(ch-1,Math.floor(ch*fraction));
+    const row=localScanContext.getImageData(0,y,cw,1);
+    const found=decodeEanRow(row);if(found)return found;
+  }
+  return "";
+}
 async function startScanner() {
-  if(scanner) { message("scanMessage","Scanner già attivo."); return; }
-  await prepareAudio(); // chiamata direttamente dal tocco dell'utente su iPhone
-  if(!await ensureCustomer()) return;
+  if(scanner){message("scanMessage","Scanner già attivo.");return;}
+  await prepareAudio();
+  if(!await ensureCustomer())return;
   if(!window.isSecureContext){message("scanMessage","La fotocamera richiede una pagina HTTPS.");return;}
-  if(typeof Html5Qrcode==="undefined"){message("scanMessage","Libreria scanner non disponibile. Apri l'app online una volta.");return;}
-  $("reader").classList.remove("hidden"); $("results").classList.add("hidden");
-  try {
-    scanner=new Html5Qrcode("reader");
-    await scanner.start({facingMode:"environment"},
-      {fps:20,qrbox:(w,h)=>{const width=Math.min(w*0.88,420);const height=Math.min(h*0.34,190);return {width:Math.max(220,width),height:Math.max(90,height)};},aspectRatio:1.777},
-      code=>{
-        const now=Date.now();
-        if(scanBusy || (code===lastScan && now-lastScanAt<1600)) return;
-        scanBusy=true; lastScan=code; lastScanAt=now;
-        Promise.resolve(onBarcode(code)).finally(()=>setTimeout(()=>{scanBusy=false;},350));
-      },()=>{});
+  $("reader").classList.remove("hidden");$("results").classList.add("hidden");
+  try{
+    localScanVideo=document.createElement("video");
+    localScanVideo.setAttribute("playsinline","");localScanVideo.setAttribute("autoplay","");localScanVideo.muted=true;
+    $("reader").replaceChildren(localScanVideo);
+    localScanStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});
+    localScanVideo.srcObject=localScanStream;await localScanVideo.play();
+    scanner={active:true};
+    const track=localScanStream.getVideoTracks()[0];
+    try{
+      const caps=track.getCapabilities?track.getCapabilities():{};
+      const advanced={};
+      if(caps.focusMode&&caps.focusMode.includes("continuous"))advanced.focusMode="continuous";
+      if(caps.zoom)advanced.zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,1.2));
+      if(Object.keys(advanced).length)await track.applyConstraints({advanced:[advanced]});
+    }catch(e){}
+    let detector=null;
+    if("BarcodeDetector" in window){try{detector=new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e"]});}catch(e){}}
+    const tick=async()=>{
+      if(!scanner||!localScanVideo||localScanVideo.readyState<2){if(scanner)localScanFrame=requestAnimationFrame(tick);return;}
+      const frameNow=performance.now();
+      if(!localScanBusy && frameNow-localScanLastFrameAt>=120){
+        localScanBusy=true;
+        localScanLastFrameAt=frameNow;
+        try{
+          let code="";
+          if(detector){try{const found=await detector.detect(localScanVideo);if(found.length)code=found[0].rawValue||"";}catch(e){}}
+          if(!code)code=decodeLocalFrame(localScanVideo);
+          if(code){
+            const now=Date.now();
+            if(!scanBusy&&!(code===lastScan&&now-lastScanAt<1600)){
+              scanBusy=true;lastScan=code;lastScanAt=now;
+              Promise.resolve(onBarcode(code)).finally(()=>setTimeout(()=>{scanBusy=false;},450));
+            }
+          }
+        }catch(e){}
+        finally{localScanBusy=false;}
+      }
+      if(scanner)localScanFrame=requestAnimationFrame(tick);
+    };
+    localScanFrame=requestAnimationFrame(tick);
     await requestScreenWakeLock();
-    try {
-      const video=$("reader").querySelector("video"), track=video && video.srcObject && video.srcObject.getVideoTracks()[0];
-      if(track && track.applyConstraints) track.applyConstraints({advanced:[{focusMode:"continuous"}]}).catch(()=>{});
-    } catch(e) {}
-    message("scanMessage","Fotocamera attiva. Inquadra un codice a barre.");
-  } catch(e) {
-    scanner=null; $("results").classList.remove("hidden");
-    message("scanMessage","Errore fotocamera: "+e.message);
+    message("scanMessage","Fotocamera attiva. Inquadra il codice EAN in orizzontale, con buona luce.");
+  }catch(e){
+    await stopScanner();
+    $("results").classList.remove("hidden");
+    message("scanMessage","Errore fotocamera: "+(e&&e.message?e.message:"accesso non disponibile"));
   }
 }
-async function stopScanner() {
-  if(scanner){try{await scanner.stop();await scanner.clear();}catch(e){} scanner=null;}
-  $("reader").classList.add("hidden"); $("results").classList.remove("hidden");
-  await releaseScreenWakeLock(); message("scanMessage","Scanner fermato.");
+async function stopScanner(){
+  if(localScanFrame)cancelAnimationFrame(localScanFrame);localScanFrame=0;
+  if(localScanStream){localScanStream.getTracks().forEach(t=>{try{t.stop();}catch(e){}});localScanStream=null;}
+  if(localScanVideo){try{localScanVideo.pause();localScanVideo.srcObject=null;}catch(e){}localScanVideo=null;}
+  scanner=null;$("reader").classList.add("hidden");$("results").classList.remove("hidden");
+  await releaseScreenWakeLock();message("scanMessage","Scanner fermato.");
 }
 function normalizeBarcodeCode(value) {
   return String(value==null?"":value).normalize("NFKC").trim().replace(/[\s-]/g,"").replace(/^0+(?=\d)/,"");
@@ -530,6 +633,6 @@ document.addEventListener("visibilitychange",async()=>{if(document.visibilitySta
       else{$("authGate").classList.remove("hidden");$("passwordLogin").classList.remove("hidden");}
     }else{$("authGate").classList.remove("hidden");$("passwordSetup").classList.remove("hidden");}
     newChoice();
-    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=3");}catch(e){console.warn("Service worker non registrato",e);}}
+    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=4");}catch(e){console.warn("Service worker non registrato",e);}}
   }catch(e){alert("Errore inizializzazione archivio: "+e.message);}
 })();

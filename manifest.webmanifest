@@ -1,11 +1,9 @@
- {
+{
   "name": "Gestione Listini 2.0",
-  "short_name": "Listini",
-  "start_url": "./",
-  "scope": "./",
+  "short_name": "Listini 2.0",
+  "start_url": "./index.html",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#eef4fa",
+  "background_color": "#f4f7fb",
   "theme_color": "#174f86",
-  "description": "Gestione offline di listini, clienti e offerte."
+  "lang": "it"
 }
