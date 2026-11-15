@@ -64,3 +64,4 @@ VERIFICHE E LIMITI
 Il decoder locale è stato provato con immagini sintetiche EAN-8 (96385074) ed EAN-13 (4006381333931), entrambe decodificate correttamente.
 Il codice scanner non richiede servizi o librerie di decodifica esterne.
 La lettura ottica reale e il comportamento della fotocamera devono comunque essere confermati su iPhone fisico; l'accesso alla fotocamera richiede HTTPS e il permesso del browser.
+\n\nREVISIONE SCANNER OFFLINE v8\n- Decoder EAN locale: scansione su più righe dell’immagine e con soglie di contrasto alternative.\n- Video scanner più compatto e centrato su schermi iPhone.\n- Richiesta video con risoluzione ideale maggiore, senza vincoli rigidi.\n- Nessuna libreria o richiesta di rete necessaria per la decodifica EAN-8/EAN-13.\n

@@ -364,13 +364,14 @@ const EAN_L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101
 const EAN_G = ["0100111","0110011","0011011","0100001","0011101","0111001","0000101","0010001","0001001","0010111"];
 const EAN_R = ["1110010","1100110","1101100","1000010","1011100","1001110","1010000","1000100","1001000","1110100"];
 const EAN_PARITY = ["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
-function decodeEanRow(imageData) {
+function decodeEanRow(imageData, forcedThreshold=null) {
   const {data,width,height}=imageData, y=Math.max(0,Math.min(height-1,Math.floor(height/2)));
   const gray=new Uint8Array(width), hist=new Uint32Array(256);
   for(let x=0;x<width;x++){const k=(y*width+x)*4,v=(data[k]*0.299+data[k+1]*0.587+data[k+2]*0.114)|0;gray[x]=v;hist[v]++;}
   let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];
   let sumB=0,wB=0,max=-1,threshold=127;
   for(let i=0;i<256;i++){wB+=hist[i];if(!wB)continue;const wF=width-wB;if(!wF)break;sumB+=i*hist[i];const between=wB*wF*(sumB/wB-(sum-sumB)/wF)**2;if(between>max){max=between;threshold=i;}}
+  if(Number.isFinite(forcedThreshold))threshold=forcedThreshold;
   const bits=gray.map(v=>v<=threshold?1:0), runs=[];
   let bit=bits[0],runStart=0;
   for(let x=1;x<=width;x++){if(x===width||bits[x]!==bit){runs.push({bit,start:runStart,len:x-runStart});if(x<width){bit=bits[x];runStart=x;}}}
@@ -425,29 +426,23 @@ function decodeLocalFrame(video) {
     localScanCanvas = document.createElement("canvas");
     localScanContext = localScanCanvas.getContext("2d", {willReadFrequently:true});
   }
-  const w = video.videoWidth, h = video.videoHeight;
-  if (!w || !h) return "";
-  const scale = Math.min(1, 1440 / w);
-  localScanCanvas.width = Math.round(w * scale);
-  localScanCanvas.height = Math.round(h * scale);
-  localScanContext.drawImage(video, 0, 0, localScanCanvas.width, localScanCanvas.height);
-  const cw = localScanCanvas.width, ch = localScanCanvas.height;
-  // Campiona più fasce e media 5 righe per ridurre rumore, riflessi e sfocatura.
-  for (const fraction of [.32,.37,.42,.47,.52,.57,.62,.67]) {
-    const y = Math.max(2, Math.min(ch - 3, Math.floor(ch * fraction)));
-    const sample = localScanContext.getImageData(0, y - 2, cw, 5);
-    const averaged = new Uint8ClampedArray(cw * 4);
-    for (let x = 0; x < cw; x++) {
-      let r=0,g=0,b=0,a=0;
-      for (let dy=0; dy<5; dy++) {
-        const k=(dy*cw+x)*4;
-        r+=sample.data[k]; g+=sample.data[k+1]; b+=sample.data[k+2]; a+=sample.data[k+3];
-      }
-      const k=x*4;
-      averaged[k]=r/5; averaged[k+1]=g/5; averaged[k+2]=b/5; averaged[k+3]=a/5;
+  const w=video.videoWidth,h=video.videoHeight;
+  if(!w||!h)return "";
+  const scale=Math.min(1,1800/w);
+  localScanCanvas.width=Math.round(w*scale);
+  localScanCanvas.height=Math.round(h*scale);
+  localScanContext.drawImage(video,0,0,localScanCanvas.width,localScanCanvas.height);
+  const cw=localScanCanvas.width,ch=localScanCanvas.height;
+  // Più righe centrali e soglie alternative: tollera riflessi e illuminazione non uniforme.
+  const fractions=[.34,.39,.44,.49,.54,.59,.64,.69];
+  const thresholds=[null,80,100,120,140,160,180,200];
+  for(const fraction of fractions){
+    const y=Math.max(0,Math.min(ch-1,Math.floor(ch*fraction)));
+    const sample=localScanContext.getImageData(0,y,cw,1);
+    for(const threshold of thresholds){
+      const found=decodeEanRow(sample,threshold);
+      if(found)return found;
     }
-    const found = decodeEanRow({data:averaged,width:cw,height:1});
-    if (found) return found;
   }
   return "";
 }
@@ -510,7 +505,7 @@ async function startScanner() {
   localScanVideo.playsInline=true;
   localScanVideo.autoplay=true;
   localScanVideo.muted=true;
-  localScanVideo.style.cssText="display:block;width:100%;max-height:320px;min-height:180px;object-fit:contain;background:#000;";
+  localScanVideo.style.cssText="display:block;width:100%;max-width:360px;height:220px;max-height:32vh;min-height:170px;object-fit:contain;background:#000;border-radius:14px;margin:0 auto;";
   $("reader").replaceChildren(localScanVideo);
 
   try{
@@ -518,7 +513,7 @@ async function startScanner() {
     try{
       cameraPromise=navigator.mediaDevices.getUserMedia({
         audio:false,
-        video:{facingMode:{ideal:"environment"}}
+        video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}
       });
       localScanStream=await cameraPromise;
     }catch(firstError){
