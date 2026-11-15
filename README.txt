@@ -47,3 +47,20 @@ VERIFICHE E LIMITI
 - Non è stato eseguito un test end-to-end in Safari/iPhone.
 - Non è stato verificato il flusso reale di stampa/condivisione PDF su iPhone.
 - Non dichiarare lo scanner verificato finché non viene provato su iPhone.
+
+
+REVISIONE SCANNER OFFLINE v5
+- Avvio della richiesta fotocamera immediatamente al tocco del pulsante, senza attendere altre operazioni asincrone.
+- Richiesta della fotocamera posteriore con vincoli minimi, più compatibili con Safari su iPhone.
+- Attesa del video pronto prima di avviare la scansione.
+- Attributi playsinline e webkit-playsinline per mantenere la fotocamera nella pagina su iOS.
+- Decoder EAN locale prioritario e indipendente dalla rete; BarcodeDetector è soltanto un ripiego opzionale.
+- Mantenuta la decodifica EAN-8 ed EAN-13 con verifica della cifra di controllo.
+- Conservati gli zeri iniziali dei codici EAN durante il confronto con l'archivio.
+- Aggiornata la cache offline alla versione gestione-listini-v7 e il riferimento del service worker.
+- Migliorata la gestione degli errori e la pulizia della fotocamera quando l'avvio non riesce.
+
+VERIFICHE E LIMITI
+Il decoder locale è stato provato con immagini sintetiche EAN-8 (96385074) ed EAN-13 (4006381333931), entrambe decodificate correttamente.
+Il codice scanner non richiede servizi o librerie di decodifica esterne.
+La lettura ottica reale e il comportamento della fotocamera devono comunque essere confermati su iPhone fisico; l'accesso alla fotocamera richiede HTTPS e il permesso del browser.

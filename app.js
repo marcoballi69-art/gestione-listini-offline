@@ -453,69 +453,183 @@ function decodeLocalFrame(video) {
 }
 
 
+function waitForScannerVideo(video, timeoutMs=10000) {
+  return new Promise((resolve,reject)=>{
+    if(video.readyState>=2 && video.videoWidth>0){resolve();return;}
+    let timer=setTimeout(()=>finish(new Error("La fotocamera non ha avviato il video. Riprova.")),timeoutMs);
+    const ready=()=>{if(video.videoWidth>0)finish(null);};
+    const failed=()=>finish(new Error("Il video della fotocamera non è disponibile."));
+    function finish(error){
+      clearTimeout(timer);
+      video.removeEventListener("loadedmetadata",ready);
+      video.removeEventListener("canplay",ready);
+      video.removeEventListener("error",failed);
+      error?reject(error):resolve();
+    }
+    video.addEventListener("loadedmetadata",ready);
+    video.addEventListener("canplay",ready);
+    video.addEventListener("error",failed);
+  });
+}
+
+function scannerCameraError(error) {
+  const name=error&&error.name?error.name:"";
+  if(name==="NotAllowedError"||name==="PermissionDeniedError")
+    return "Permesso fotocamera negato. Consenti l'accesso alla fotocamera per questo sito nelle impostazioni di Safari.";
+  if(name==="NotFoundError"||name==="DevicesNotFoundError")
+    return "Non trovo una fotocamera disponibile sul dispositivo.";
+  if(name==="NotReadableError"||name==="TrackStartError")
+    return "La fotocamera è occupata da un'altra app. Chiudi le altre app che la usano e riprova.";
+  if(name==="SecurityError"||!window.isSecureContext)
+    return "La fotocamera richiede HTTPS. Apri l'app dal suo indirizzo GitHub Pages sicuro.";
+  return error&&error.message?error.message:"Non è stato possibile avviare la fotocamera.";
+}
+
 async function startScanner() {
   if(scanner){message("scanMessage","Scanner già attivo.");return;}
-  await prepareAudio();
-  if(!await ensureCustomer())return;
-  if(!window.isSecureContext){message("scanMessage","La fotocamera richiede una pagina HTTPS.");return;}
-  $("reader").classList.remove("hidden");$("results").classList.add("hidden");
+  if(!window.isSecureContext){
+    message("scanMessage","La fotocamera richiede HTTPS. Apri l'app dal suo indirizzo GitHub Pages.");
+    return;
+  }
+  if(!navigator.mediaDevices||typeof navigator.mediaDevices.getUserMedia!=="function"){
+    message("scanMessage","Questo browser non rende disponibile la fotocamera. Apri l'app con Safari aggiornato.");
+    return;
+  }
+
+  // Chiedi la fotocamera subito nel gesto del pulsante: su iOS è importante
+  // non anteporre altre operazioni asincrone alla richiesta dei permessi.
+  $("reader").classList.remove("hidden");
+  $("results").classList.add("hidden");
+  message("scanMessage","Richiesta accesso alla fotocamera…");
+
+  localScanVideo=document.createElement("video");
+  localScanVideo.setAttribute("playsinline","");
+  localScanVideo.setAttribute("webkit-playsinline","");
+  localScanVideo.setAttribute("autoplay","");
+  localScanVideo.setAttribute("muted","");
+  localScanVideo.playsInline=true;
+  localScanVideo.autoplay=true;
+  localScanVideo.muted=true;
+  localScanVideo.style.cssText="display:block;width:100%;max-height:320px;min-height:180px;object-fit:contain;background:#000;";
+  $("reader").replaceChildren(localScanVideo);
+
   try{
-    localScanVideo=document.createElement("video");
-    localScanVideo.setAttribute("playsinline","");localScanVideo.setAttribute("autoplay","");localScanVideo.muted=true;
-    $("reader").replaceChildren(localScanVideo);
-    localScanStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:24,max:30}}});
-    localScanVideo.srcObject=localScanStream;await localScanVideo.play();
+    let cameraPromise;
+    try{
+      cameraPromise=navigator.mediaDevices.getUserMedia({
+        audio:false,
+        video:{facingMode:{ideal:"environment"}}
+      });
+      localScanStream=await cameraPromise;
+    }catch(firstError){
+      // Fallback solo se il browser non accetta il vincolo della fotocamera posteriore.
+      if(firstError&&["OverconstrainedError","NotFoundError"].includes(firstError.name)){
+        localScanStream=await navigator.mediaDevices.getUserMedia({audio:false,video:true});
+      }else{
+        throw firstError;
+      }
+    }
+
+    localScanVideo.srcObject=localScanStream;
+    await waitForScannerVideo(localScanVideo);
+    await localScanVideo.play();
     scanner={active:true};
+
     const track=localScanStream.getVideoTracks()[0];
     try{
-      const caps=track.getCapabilities?track.getCapabilities():{};
-      const advanced={};
-      if(caps.focusMode&&caps.focusMode.includes("continuous"))advanced.focusMode="continuous";
-      if(caps.zoom)advanced.zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,1.35));
-      if(Object.keys(advanced).length)await track.applyConstraints({advanced:[advanced]});
-    }catch(e){}
+      if(track&&track.getCapabilities&&track.applyConstraints){
+        const caps=track.getCapabilities(),advanced={};
+        if(caps.focusMode&&caps.focusMode.includes("continuous"))advanced.focusMode="continuous";
+        if(caps.zoom&&Number.isFinite(caps.zoom.max)&&caps.zoom.max>caps.zoom.min)
+          advanced.zoom=Math.min(caps.zoom.max,Math.max(caps.zoom.min,1.2));
+        if(Object.keys(advanced).length)await track.applyConstraints({advanced:[advanced]});
+      }
+    }catch(e){ /* I controlli autofocus/zoom non sono esposti da tutti gli iPhone. */ }
+
+    // Decoder EAN locale prioritario: non richiede Internet né librerie esterne.
+    // BarcodeDetector è solo un eventuale ripiego del browser.
     let detector=null;
-    if("BarcodeDetector" in window){try{detector=new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e"]});}catch(e){}}
+    if("BarcodeDetector" in window){
+      try{
+        const wanted=["ean_13","ean_8"];
+        const supported=typeof BarcodeDetector.getSupportedFormats==="function"
+          ? await BarcodeDetector.getSupportedFormats() : wanted;
+        const formats=wanted.filter(format=>supported.includes(format));
+        if(formats.length)detector=new BarcodeDetector({formats});
+      }catch(e){detector=null;}
+    }
+
+    localScanBusy=false;
+    localScanLastFrameAt=0;
     const tick=async()=>{
-      if(!scanner||!localScanVideo||localScanVideo.readyState<2){if(scanner)localScanFrame=requestAnimationFrame(tick);return;}
-      const frameNow=performance.now();
-      if(!localScanBusy && frameNow-localScanLastFrameAt>=120){
+      if(!scanner||!localScanVideo)return;
+      if(localScanVideo.readyState<2||!localScanVideo.videoWidth){
+        localScanFrame=requestAnimationFrame(tick);
+        return;
+      }
+      const now=performance.now();
+      if(!localScanBusy&&now-localScanLastFrameAt>=160){
         localScanBusy=true;
-        localScanLastFrameAt=frameNow;
+        localScanLastFrameAt=now;
         try{
           let code="";
-          if(detector){try{const found=await detector.detect(localScanVideo);if(found.length)code=found[0].rawValue||"";}catch(e){}}
-          if(!code)code=decodeLocalFrame(localScanVideo);
+          // Il decoder incorporato viene eseguito sempre, anche completamente offline.
+          code=decodeLocalFrame(localScanVideo);
+          if(!code&&detector){
+            try{
+              const found=await detector.detect(localScanVideo);
+              if(found&&found.length)code=found[0].rawValue||"";
+            }catch(e){detector=null;}
+          }
           if(code){
-            const now=Date.now();
-            if(!scanBusy&&!(code===lastScan&&now-lastScanAt<1600)){
-              scanBusy=true;lastScan=code;lastScanAt=now;
-              Promise.resolve(onBarcode(code)).finally(()=>setTimeout(()=>{scanBusy=false;},450));
+            const stamp=Date.now();
+            if(!scanBusy&&!(code===lastScan&&stamp-lastScanAt<1600)){
+              scanBusy=true;
+              lastScan=code;
+              lastScanAt=stamp;
+              Promise.resolve(onBarcode(code)).catch(error=>{
+                message("scanMessage","Errore durante l'acquisizione: "+(error&&error.message?error.message:"riprova"));
+              }).finally(()=>setTimeout(()=>{scanBusy=false;},500));
             }
           }
-        }catch(e){}
-        finally{localScanBusy=false;}
+        }catch(e){
+          // Un fotogramma non leggibile non deve interrompere il ciclo di scansione.
+        }finally{
+          localScanBusy=false;
+        }
       }
       if(scanner)localScanFrame=requestAnimationFrame(tick);
     };
     localScanFrame=requestAnimationFrame(tick);
-    await requestScreenWakeLock();
-    message("scanMessage","Scanner attivo: mantieni il codice intero nell'inquadratura, orizzontale e a fuoco. Avvicina o allontana lentamente il telefono.");
+    try{await prepareAudio();}catch(e){}
+    try{await requestScreenWakeLock();}catch(e){}
+    message("scanMessage","Fotocamera attiva. Inquadra il codice EAN intero, in orizzontale, con buona luce.");
   }catch(e){
     await stopScanner();
     $("results").classList.remove("hidden");
-    message("scanMessage","Errore fotocamera: "+(e&&e.message?e.message:"accesso non disponibile"));
+    message("scanMessage","Scanner non avviato: "+scannerCameraError(e));
   }
 }
 async function stopScanner(){
-  if(localScanFrame)cancelAnimationFrame(localScanFrame);localScanFrame=0;
-  if(localScanStream){localScanStream.getTracks().forEach(t=>{try{t.stop();}catch(e){}});localScanStream=null;}
-  if(localScanVideo){try{localScanVideo.pause();localScanVideo.srcObject=null;}catch(e){}localScanVideo=null;}
-  scanner=null;$("reader").classList.add("hidden");$("results").classList.remove("hidden");
-  await releaseScreenWakeLock();message("scanMessage","Scanner fermato.");
+  if(localScanFrame)cancelAnimationFrame(localScanFrame);
+  localScanFrame=0;
+  if(localScanStream){
+    localScanStream.getTracks().forEach(track=>{try{track.stop();}catch(e){}});
+    localScanStream=null;
+  }
+  if(localScanVideo){
+    try{localScanVideo.pause();localScanVideo.srcObject=null;}catch(e){}
+    localScanVideo=null;
+  }
+  scanner=null;
+  localScanBusy=false;
+  $("reader").classList.add("hidden");
+  $("results").classList.remove("hidden");
+  await releaseScreenWakeLock();
+  message("scanMessage","Scanner fermato.");
 }
 function normalizeBarcodeCode(value) {
-  return String(value==null?"":value).normalize("NFKC").trim().replace(/[\s-]/g,"").replace(/^0+(?=\d)/,"");
+  return String(value==null?"":value).normalize("NFKC").trim().replace(/[\s-]/g,"");
 }
 async function onBarcode(code) {
   const scanned=normalizeBarcodeCode(code);
@@ -1086,6 +1200,6 @@ document.addEventListener("visibilitychange",async()=>{if(document.visibilitySta
       else{$("authGate").classList.remove("hidden");$("passwordLogin").classList.remove("hidden");}
     }else{$("authGate").classList.remove("hidden");$("passwordSetup").classList.remove("hidden");}
     newChoice();
-    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=6");}catch(e){console.warn("Service worker non registrato",e);}}
+    if("serviceWorker"in navigator){try{await navigator.serviceWorker.register("./sw.js?v=7");}catch(e){console.warn("Service worker non registrato",e);}}
   }catch(e){alert("Errore inizializzazione archivio: "+e.message);}
 })();
