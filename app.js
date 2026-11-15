@@ -365,77 +365,101 @@ const EAN_G = ["0100111","0110011","0011011","0100001","0011101","0111001","0000
 const EAN_R = ["1110010","1100110","1101100","1000010","1011100","1001110","1010000","1000100","1001000","1110100"];
 const EAN_PARITY = ["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
 function decodeEanRow(imageData, forcedThreshold=null) {
-  const {data,width,height}=imageData, y=Math.max(0,Math.min(height-1,Math.floor(height/2)));
-  const gray=new Uint8Array(width), hist=new Uint32Array(256);
-  for(let x=0;x<width;x++){const k=(y*width+x)*4,v=(data[k]*0.299+data[k+1]*0.587+data[k+2]*0.114)|0;gray[x]=v;hist[v]++;}
-  let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];
-  let sumB=0,wB=0,max=-1,threshold=127;
-  for(let i=0;i<256;i++){wB+=hist[i];if(!wB)continue;const wF=width-wB;if(!wF)break;sumB+=i*hist[i];const between=wB*wF*(sumB/wB-(sum-sumB)/wF)**2;if(between>max){max=between;threshold=i;}}
-  if(Number.isFinite(forcedThreshold))threshold=forcedThreshold;
-  const bits=gray.map(v=>v<=threshold?1:0), runs=[];
-  let bit=bits[0],runStart=0;
-  for(let x=1;x<=width;x++){if(x===width||bits[x]!==bit){runs.push({bit,start:runStart,len:x-runStart});if(x<width){bit=bits[x];runStart=x;}}}
-  const near=(a,b,t)=>Math.abs(a-b)<=Math.max(1,b*t);
+  const {data,width,height}=imageData;
+  if(!width||!height)return "";
+  const y=Math.max(0,Math.min(height-1,Math.floor(height/2)));
+  const gray=new Uint8Array(width),hist=new Uint32Array(256);
+  for(let x=0;x<width;x++){
+    const k=(y*width+x)*4;
+    const v=(data[k]*.299+data[k+1]*.587+data[k+2]*.114)|0;
+    gray[x]=v;hist[v]++;
+  }
+  let threshold=127;
+  if(Number.isFinite(forcedThreshold)) threshold=forcedThreshold;
+  else {
+    let total=0;for(let i=0;i<256;i++)total+=i*hist[i];
+    let sumB=0,wB=0,maxVariance=-1;
+    for(let i=0;i<256;i++){
+      wB+=hist[i];if(!wB)continue;
+      const wF=width-wB;if(!wF)break;
+      sumB+=i*hist[i];
+      const variance=wB*wF*Math.pow(sumB/wB-(total-sumB)/wF,2);
+      if(variance>maxVariance){maxVariance=variance;threshold=i;}
+    }
+  }
+  const bits=new Uint8Array(width);
+  for(let x=0;x<width;x++)bits[x]=gray[x]<=threshold?1:0;
+  const runs=[];let bit=bits[0],start=0;
+  for(let x=1;x<=width;x++){
+    if(x===width||bits[x]!==bit){runs.push({bit,start,len:x-start});if(x<width){bit=bits[x];start=x;}}
+  }
+  const near=(a,b,t=.5)=>Math.abs(a-b)<=Math.max(1,b*t);
+  function parsePattern(pattern){
+    if(pattern.length===67&&pattern.slice(0,3)==="101"&&pattern.slice(31,36)==="01010"&&pattern.slice(64)==="101"){
+      const digits=[];
+      for(let d=0;d<4;d++){const n=EAN_L.indexOf(pattern.slice(3+d*7,10+d*7));if(n<0)return "";digits.push(n);}
+      for(let d=0;d<4;d++){const n=EAN_R.indexOf(pattern.slice(36+d*7,43+d*7));if(n<0)return "";digits.push(n);}
+      const sum=digits.slice(0,7).reduce((v,n,i)=>v+n*(i%2===0?3:1),0);
+      return (10-sum%10)%10===digits[7]?digits.join(""):"";
+    }
+    if(pattern.length===95&&pattern.slice(0,3)==="101"&&pattern.slice(45,50)==="01010"&&pattern.slice(92)==="101"){
+      const left=[],right=[];let parity="";
+      for(let d=0;d<6;d++){
+        const part=pattern.slice(3+d*7,10+d*7);let found=-1,kind="";
+        for(let n=0;n<10;n++){if(part===EAN_L[n]){found=n;kind="L";break;}if(part===EAN_G[n]){found=n;kind="G";break;}}
+        if(found<0)return "";left.push(found);parity+=kind;
+      }
+      const first=EAN_PARITY.indexOf(parity);if(first<0)return "";
+      for(let d=0;d<6;d++){const n=EAN_R.indexOf(pattern.slice(50+d*7,57+d*7));if(n<0)return "";right.push(n);}
+      const digits=[first,...left,...right];
+      const sum=digits.slice(0,12).reduce((v,n,i)=>v+n*(i%2===0?1:3),0);
+      return (10-sum%10)%10===digits[12]?digits.join(""):"";
+    }
+    return "";
+  }
+  // Cerca le guardie iniziali e prova piccole correzioni di scala/allineamento:
+  // la messa a fuoco e la prospettiva di iPhone possono spostare i bordi di alcuni pixel.
+  const scales=[.88,.93,.97,1,1.03,1.07,1.12];
+  const shifts=[-.35,-.18,0,.18,.35];
   for(let i=0;i<runs.length-2;i++){
     if(runs[i].bit!==1||runs[i+1].bit!==0||runs[i+2].bit!==1)continue;
     const module=(runs[i].len+runs[i+1].len+runs[i+2].len)/3;
-    if(module<1.15||!near(runs[i].len,module,.48)||!near(runs[i+1].len,module,.48)||!near(runs[i+2].len,module,.48))continue;
-    const x0=runs[i].start;
-
-    // EAN-8: 67 moduli (101 + 4 cifre + 01010 + 4 cifre + 101).
-    if(x0+67*module<=width){
-      let p8="";
-      for(let n=0;n<67;n++){const x=Math.min(width-1,Math.floor(x0+(n+.5)*module));p8+=bits[x]?"1":"0";}
-      if(p8.slice(0,3)==="101"&&p8.slice(31,36)==="01010"&&p8.slice(64,67)==="101"){
-        const digits8=[];let valid8=true;
-        for(let d=0;d<4;d++){const n=EAN_L.indexOf(p8.slice(3+d*7,10+d*7));if(n<0){valid8=false;break;}digits8.push(n);}
-        if(valid8){
-          for(let d=0;d<4;d++){const n=EAN_R.indexOf(p8.slice(36+d*7,43+d*7));if(n<0){valid8=false;break;}digits8.push(n);}
-        }
-        if(valid8){
-          const sum8=digits8.slice(0,7).reduce((s,v,i)=>s+v*(i%2===0?3:1),0);
-          if((10-sum8%10)%10===digits8[7])return digits8.join("");
+    if(module<.8||!near(runs[i].len,module,.65)||!near(runs[i+1].len,module,.65)||!near(runs[i+2].len,module,.65))continue;
+    for(const scale of scales){
+      const m=module*scale;
+      for(const shift of shifts){
+        const x0=runs[i].start+shift*m;
+        for(const length of [67,95]){
+          if(x0+length*m>width||x0<0)continue;
+          let pattern="";
+          for(let n=0;n<length;n++){
+            const x=Math.max(0,Math.min(width-1,Math.floor(x0+(n+.5)*m)));
+            pattern+=bits[x]?"1":"0";
+          }
+          const decoded=parsePattern(pattern);
+          if(decoded)return decoded;
         }
       }
     }
-
-    // EAN-13.
-    const total=95*module;
-    if(x0+total>width)continue;
-    let pattern="";
-    for(let n=0;n<95;n++){const x=Math.min(width-1,Math.floor(x0+(n+.5)*module));pattern+=bits[x]?"1":"0";}
-    if(pattern.slice(0,3)!=="101"||pattern.slice(45,50)!=="01010"||pattern.slice(92,95)!=="101")continue;
-    const left=[],right=[];let parity="";
-    for(let d=0;d<6;d++){
-      const p=pattern.slice(3+d*7,10+d*7);
-      let found=-1,kind="";
-      for(let n=0;n<10;n++){if(p===EAN_L[n]){found=n;kind="L";break;}if(p===EAN_G[n]){found=n;kind="G";break;}}
-      if(found<0){left.length=0;break;}left.push(found);parity+=kind;
-    }
-    if(left.length!==6)continue;
-    const first=EAN_PARITY.indexOf(parity);if(first<0)continue;
-    for(let d=0;d<6;d++){const p=pattern.slice(50+d*7,57+d*7),n=EAN_R.indexOf(p);if(n<0){right.length=0;break;}right.push(n);}
-    if(right.length!==6)continue;
-    const digits=[first,...left,...right],sumCheck=digits.slice(0,12).reduce((s,v,i)=>s+v*(i%2===0?1:3),0),check=(10-sumCheck%10)%10;
-    if(check===digits[12])return digits.join("");
   }
   return "";
-}
+} 
 function decodeLocalFrame(video) {
-  if (!localScanCanvas) {
-    localScanCanvas = document.createElement("canvas");
-    localScanContext = localScanCanvas.getContext("2d", {willReadFrequently:true});
+  if(!localScanCanvas){
+    localScanCanvas=document.createElement("canvas");
+    localScanContext=localScanCanvas.getContext("2d",{willReadFrequently:true});
   }
   const w=video.videoWidth,h=video.videoHeight;
-  if(!w||!h)return "";
-  const scale=Math.min(1,1800/w);
+  if(!w||!h||!localScanContext)return "";
+  const scale=Math.min(1.5,2400/w);
   localScanCanvas.width=Math.round(w*scale);
   localScanCanvas.height=Math.round(h*scale);
   localScanContext.drawImage(video,0,0,localScanCanvas.width,localScanCanvas.height);
   const cw=localScanCanvas.width,ch=localScanCanvas.height;
-  // Più righe centrali e soglie alternative: tollera riflessi e illuminazione non uniforme.
-  const fractions=[.34,.39,.44,.49,.54,.59,.64,.69];
-  const thresholds=[null,80,100,120,140,160,180,200];
+  // Campiona molte righe nella fascia centrale: non dipende da una singola riga
+  // che potrebbe attraversare il testo o una zona riflessa dell'etichetta.
+  const fractions=[.30,.34,.38,.42,.46,.50,.54,.58,.62,.66,.70];
+  const thresholds=[null,105,135,165,195];
   for(const fraction of fractions){
     const y=Math.max(0,Math.min(ch-1,Math.floor(ch*fraction)));
     const sample=localScanContext.getImageData(0,y,cw,1);
@@ -446,7 +470,6 @@ function decodeLocalFrame(video) {
   }
   return "";
 }
-
 
 function waitForScannerVideo(video, timeoutMs=10000) {
   return new Promise((resolve,reject)=>{
@@ -505,7 +528,7 @@ async function startScanner() {
   localScanVideo.playsInline=true;
   localScanVideo.autoplay=true;
   localScanVideo.muted=true;
-  localScanVideo.style.cssText="display:block;width:100%;max-width:360px;height:220px;max-height:32vh;min-height:170px;object-fit:contain;background:#000;border-radius:14px;margin:0 auto;";
+  localScanVideo.style.cssText="display:block;width:100%;max-width:292px;height:170px;max-height:26vh;min-height:145px;object-fit:contain;background:#000;border-radius:14px;margin:0 auto;";
   $("reader").replaceChildren(localScanVideo);
 
   try{
@@ -563,7 +586,7 @@ async function startScanner() {
         return;
       }
       const now=performance.now();
-      if(!localScanBusy&&now-localScanLastFrameAt>=160){
+      if(!localScanBusy&&now-localScanLastFrameAt>=220){
         localScanBusy=true;
         localScanLastFrameAt=now;
         try{
