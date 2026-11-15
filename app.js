@@ -393,57 +393,82 @@ function decodeEanRow(imageData, forcedThreshold=null) {
   for(let x=1;x<=width;x++){
     if(x===width||bits[x]!==bit){runs.push({bit,start,len:x-start});if(x<width){bit=bits[x];start=x;}}
   }
-  const near=(a,b,t=.5)=>Math.abs(a-b)<=Math.max(1,b*t);
-  function parsePattern(pattern){
-    if(pattern.length===67&&pattern.slice(0,3)==="101"&&pattern.slice(31,36)==="01010"&&pattern.slice(64)==="101"){
-      const digits=[];
-      for(let d=0;d<4;d++){const n=EAN_L.indexOf(pattern.slice(3+d*7,10+d*7));if(n<0)return "";digits.push(n);}
-      for(let d=0;d<4;d++){const n=EAN_R.indexOf(pattern.slice(36+d*7,43+d*7));if(n<0)return "";digits.push(n);}
-      const sum=digits.slice(0,7).reduce((v,n,i)=>v+n*(i%2===0?3:1),0);
-      return (10-sum%10)%10===digits[7]?digits.join(""):"";
+  const runWidths = pattern => {
+    const out=[];let last=pattern[0],count=1;
+    for(let i=1;i<pattern.length;i++){if(pattern[i]===last)count++;else{out.push(count);last=pattern[i];count=1;}}
+    out.push(count);return out;
+  };
+  const patternTables = {L:EAN_L.map(runWidths),G:EAN_G.map(runWidths),R:EAN_R.map(runWidths)};
+  function matchDigit(group,kind,module){
+    if(group.length!==4)return null;
+    const total=group.reduce((s,r)=>s+r.len,0);
+    if(Math.abs(total/module-7)>.9)return null;
+    let best=-1,bestScore=Infinity;
+    for(let n=0;n<10;n++){
+      const expected=patternTables[kind][n];let score=0;
+      for(let j=0;j<4;j++)score+=Math.abs(group[j].len/module-expected[j]);
+      if(score<bestScore){bestScore=score;best=n;}
     }
-    if(pattern.length===95&&pattern.slice(0,3)==="101"&&pattern.slice(45,50)==="01010"&&pattern.slice(92)==="101"){
-      const left=[],right=[];let parity="";
-      for(let d=0;d<6;d++){
-        const part=pattern.slice(3+d*7,10+d*7);let found=-1,kind="";
-        for(let n=0;n<10;n++){if(part===EAN_L[n]){found=n;kind="L";break;}if(part===EAN_G[n]){found=n;kind="G";break;}}
-        if(found<0)return "";left.push(found);parity+=kind;
-      }
-      const first=EAN_PARITY.indexOf(parity);if(first<0)return "";
-      for(let d=0;d<6;d++){const n=EAN_R.indexOf(pattern.slice(50+d*7,57+d*7));if(n<0)return "";right.push(n);}
-      const digits=[first,...left,...right];
-      const sum=digits.slice(0,12).reduce((v,n,i)=>v+n*(i%2===0?1:3),0);
-      return (10-sum%10)%10===digits[12]?digits.join(""):"";
-    }
-    return "";
+    return bestScore<=1.45?{digit:best,score:bestScore}:null;
   }
-  // Cerca le guardie iniziali e prova piccole correzioni di scala/allineamento:
-  // la messa a fuoco e la prospettiva di iPhone possono spostare i bordi di alcuni pixel.
-  const scales=[.88,.93,.97,1,1.03,1.07,1.12];
-  const shifts=[-.35,-.18,0,.18,.35];
-  for(let i=0;i<runs.length-2;i++){
+  function guardOK(group,module){
+    return group.length===3&&group.every(r=>Math.abs(r.len/module-1)<=.8);
+  }
+  function centerOK(group,module){
+    return group.length===5&&group.every(r=>Math.abs(r.len/module-1)<=.85);
+  }
+  function checksum(digits){
+    const n=digits.length,check=digits[n-1];
+    let sum=0;
+    for(let i=0;i<n-1;i++)sum+=digits[i]*(((n===13?i%2===1:i%2===0)?3:1));
+    return (10-sum%10)%10===check;
+  }
+  for(let i=0;i+42<runs.length;i++){
     if(runs[i].bit!==1||runs[i+1].bit!==0||runs[i+2].bit!==1)continue;
     const module=(runs[i].len+runs[i+1].len+runs[i+2].len)/3;
-    if(module<.8||!near(runs[i].len,module,.65)||!near(runs[i+1].len,module,.65)||!near(runs[i+2].len,module,.65))continue;
-    for(const scale of scales){
-      const m=module*scale;
-      for(const shift of shifts){
-        const x0=runs[i].start+shift*m;
-        for(const length of [67,95]){
-          if(x0+length*m>width||x0<0)continue;
-          let pattern="";
-          for(let n=0;n<length;n++){
-            const x=Math.max(0,Math.min(width-1,Math.floor(x0+(n+.5)*m)));
-            pattern+=bits[x]?"1":"0";
-          }
-          const decoded=parsePattern(pattern);
-          if(decoded)return decoded;
+    if(module<.8||!guardOK(runs.slice(i,i+3),module))continue;
+    // EAN-13: start + 6 left digits + center + 6 right digits + end.
+    if(i+59<=runs.length){
+      let pos=i+3,left=[],parity="",valid=true;
+      for(let d=0;d<6;d++){
+        const group=runs.slice(pos,pos+4);pos+=4;
+        const l=matchDigit(group,"L",module),g=matchDigit(group,"G",module);
+        if(!l&&!g){valid=false;break;}
+        if(g&&(!l||g.score<l.score)){left.push(g.digit);parity+="G";}else{left.push(l.digit);parity+="L";}
+      }
+      if(valid&&centerOK(runs.slice(pos,pos+5),module)){
+        pos+=5;const right=[];
+        for(let d=0;d<6;d++){
+          const m=matchDigit(runs.slice(pos,pos+4),"R",module);pos+=4;
+          if(!m){valid=false;break;}right.push(m.digit);
+        }
+        if(valid&&guardOK(runs.slice(pos,pos+3),module)){
+          const first=EAN_PARITY.indexOf(parity),digits=[first,...left,...right];
+          if(first>=0&&checksum(digits))return digits.join("");
+        }
+      }
+    }
+    // EAN-8: start + 4 left digits + center + 4 right digits + end.
+    if(i+43<=runs.length){
+      let pos=i+3,left=[],valid=true;
+      for(let d=0;d<4;d++){
+        const m=matchDigit(runs.slice(pos,pos+4),"L",module);pos+=4;
+        if(!m){valid=false;break;}left.push(m.digit);
+      }
+      if(valid&&centerOK(runs.slice(pos,pos+5),module)){
+        pos+=5;const right=[];
+        for(let d=0;d<4;d++){
+          const m=matchDigit(runs.slice(pos,pos+4),"R",module);pos+=4;
+          if(!m){valid=false;break;}right.push(m.digit);
+        }
+        if(valid&&guardOK(runs.slice(pos,pos+3),module)){
+          const digits=[...left,...right];if(checksum(digits))return digits.join("");
         }
       }
     }
   }
   return "";
-} 
+}
 function decodeLocalFrame(video) {
   if(!localScanCanvas){
     localScanCanvas=document.createElement("canvas");
@@ -451,15 +476,15 @@ function decodeLocalFrame(video) {
   }
   const w=video.videoWidth,h=video.videoHeight;
   if(!w||!h||!localScanContext)return "";
-  const scale=Math.min(1.5,2400/w);
+  const scale=Math.min(2,2800/w);
   localScanCanvas.width=Math.round(w*scale);
   localScanCanvas.height=Math.round(h*scale);
   localScanContext.drawImage(video,0,0,localScanCanvas.width,localScanCanvas.height);
   const cw=localScanCanvas.width,ch=localScanCanvas.height;
   // Campiona molte righe nella fascia centrale: non dipende da una singola riga
   // che potrebbe attraversare il testo o una zona riflessa dell'etichetta.
-  const fractions=[.30,.34,.38,.42,.46,.50,.54,.58,.62,.66,.70];
-  const thresholds=[null,105,135,165,195];
+  const fractions=[.24,.29,.34,.39,.44,.49,.54,.59,.64,.69,.74];
+  const thresholds=[null,110,145,180];
   for(const fraction of fractions){
     const y=Math.max(0,Math.min(ch-1,Math.floor(ch*fraction)));
     const sample=localScanContext.getImageData(0,y,cw,1);
@@ -528,7 +553,7 @@ async function startScanner() {
   localScanVideo.playsInline=true;
   localScanVideo.autoplay=true;
   localScanVideo.muted=true;
-  localScanVideo.style.cssText="display:block;width:100%;max-width:292px;height:170px;max-height:26vh;min-height:145px;object-fit:contain;background:#000;border-radius:14px;margin:0 auto;";
+  localScanVideo.style.cssText="display:block;width:100%;max-width:292px;height:130px;max-height:20vh;min-height:105px;object-fit:contain;background:#000;border-radius:14px;margin:0 auto;";
   $("reader").replaceChildren(localScanVideo);
 
   try{
@@ -660,7 +685,7 @@ async function onBarcode(code) {
     message("scanMessage",(added?"TROVATO: ":"GIÀ PRESENTE: ")+a.name+" — "+priceText(a));
     return;
   }
-  message("scanMessage","Codice non trovato. Inserisci manualmente l'articolo.");
+  message("scanMessage","Codice letto: "+scanned+". Articolo non presente nel listino: inseriscilo manualmente.");
   $("manualAdd").classList.remove("hidden");
   $("manualName").value=""; $("manualQty").value=""; $("manualName").focus();
 }
