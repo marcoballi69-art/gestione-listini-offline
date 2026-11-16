@@ -1,6 +1,6 @@
 "use strict";
-const CACHE_NAME = "gestione-listini-v10";
-const APP_FILES = ["./","./index.html","./app.js","./manifest.webmanifest","./README.txt"];
+const CACHE_NAME = "gestione-listini-v11";
+const APP_FILES = ["./","./index.html","./app.js","./manifest.webmanifest","./README.txt","./LEGGIMI.txt"];
 const EXTERNAL_FILES = [
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",

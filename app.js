@@ -364,14 +364,34 @@ const EAN_L = ["0001101","0011001","0010011","0111101","0100011","0110001","0101
 const EAN_G = ["0100111","0110011","0011011","0100001","0011101","0111001","0000101","0010001","0001001","0010111"];
 const EAN_R = ["1110010","1100110","1101100","1000010","1011100","1001110","1010000","1000100","1001000","1110100"];
 const EAN_PARITY = ["LLLLLL","LLGLGG","LLGGLG","LLGGGL","LGLLGG","LGGLLG","LGGGLL","LGLGLG","LGLGGL","LGGLGL"];
+// Le sequenze di larghezza dei moduli sono precalcolate una sola volta:
+// evita di ricrearle per ogni riga e rende la scansione più fluida sui telefoni.
+const EAN_PATTERN_RUNS = (() => {
+  const toRuns = pattern => {
+    const out=[]; let last=pattern[0],count=1;
+    for(let i=1;i<pattern.length;i++){
+      if(pattern[i]===last)count++;
+      else{out.push(count);last=pattern[i];count=1;}
+    }
+    out.push(count); return out;
+  };
+  return {L:EAN_L.map(toRuns),G:EAN_G.map(toRuns),R:EAN_R.map(toRuns)};
+})();
 function decodeEanRow(imageData, forcedThreshold=null) {
   const {data,width,height}=imageData;
   if(!width||!height)return "";
-  const y=Math.max(0,Math.min(height-1,Math.floor(height/2)));
+  const centerY=Math.floor((height-1)/2);
+  const firstY=Math.max(0,centerY-1),lastY=Math.min(height-1,centerY+1);
   const gray=new Uint8Array(width),hist=new Uint32Array(256);
+  // Media di tre righe contigue: riduce rumore e artefatti del sensore.
   for(let x=0;x<width;x++){
-    const k=(y*width+x)*4;
-    const v=(data[k]*.299+data[k+1]*.587+data[k+2]*.114)|0;
+    let luminance=0,count=0;
+    for(let y=firstY;y<=lastY;y++){
+      const k=(y*width+x)*4;
+      luminance+=data[k]*.299+data[k+1]*.587+data[k+2]*.114;
+      count++;
+    }
+    const v=Math.round(luminance/count);
     gray[x]=v;hist[v]++;
   }
   let threshold=127;
@@ -393,19 +413,13 @@ function decodeEanRow(imageData, forcedThreshold=null) {
   for(let x=1;x<=width;x++){
     if(x===width||bits[x]!==bit){runs.push({bit,start,len:x-start});if(x<width){bit=bits[x];start=x;}}
   }
-  const runWidths = pattern => {
-    const out=[];let last=pattern[0],count=1;
-    for(let i=1;i<pattern.length;i++){if(pattern[i]===last)count++;else{out.push(count);last=pattern[i];count=1;}}
-    out.push(count);return out;
-  };
-  const patternTables = {L:EAN_L.map(runWidths),G:EAN_G.map(runWidths),R:EAN_R.map(runWidths)};
   function matchDigit(group,kind,module){
     if(group.length!==4)return null;
     const total=group.reduce((s,r)=>s+r.len,0);
     if(Math.abs(total/module-7)>.9)return null;
     let best=-1,bestScore=Infinity;
     for(let n=0;n<10;n++){
-      const expected=patternTables[kind][n];let score=0;
+      const expected=EAN_PATTERN_RUNS[kind][n];let score=0;
       for(let j=0;j<4;j++)score+=Math.abs(group[j].len/module-expected[j]);
       if(score<bestScore){bestScore=score;best=n;}
     }
@@ -481,13 +495,13 @@ function decodeLocalFrame(video) {
   localScanCanvas.height=Math.round(h*scale);
   localScanContext.drawImage(video,0,0,localScanCanvas.width,localScanCanvas.height);
   const cw=localScanCanvas.width,ch=localScanCanvas.height;
-  // Campiona molte righe nella fascia centrale: non dipende da una singola riga
-  // che potrebbe attraversare il testo o una zona riflessa dell'etichetta.
-  const fractions=[.24,.29,.34,.39,.44,.49,.54,.59,.64,.69,.74];
+  // Esamina 21 fasce dall'alto verso il basso. Ogni campione usa tre righe
+  // mediate, così una singola riga disturbata non blocca la lettura.
+  const fractions=[.10,.14,.18,.22,.26,.30,.34,.38,.42,.46,.50,.54,.58,.62,.66,.70,.74,.78,.82,.86,.90];
   const thresholds=[null,110,145,180];
   for(const fraction of fractions){
-    const y=Math.max(0,Math.min(ch-1,Math.floor(ch*fraction)));
-    const sample=localScanContext.getImageData(0,y,cw,1);
+    const y=Math.max(0,Math.min(ch-3,Math.floor(ch*fraction)-1));
+    const sample=localScanContext.getImageData(0,y,cw,3);
     for(const threshold of thresholds){
       const found=decodeEanRow(sample,threshold);
       if(found)return found;
@@ -553,7 +567,7 @@ async function startScanner() {
   localScanVideo.playsInline=true;
   localScanVideo.autoplay=true;
   localScanVideo.muted=true;
-  localScanVideo.style.cssText="display:block;width:100%;max-width:292px;height:130px;max-height:20vh;min-height:105px;object-fit:contain;background:#000;border-radius:14px;margin:0 auto;";
+  localScanVideo.style.cssText="display:block;width:100%;max-width:360px;height:210px;max-height:30vh;min-height:145px;object-fit:contain;background:#000;border-radius:14px;margin:0 auto;";
   $("reader").replaceChildren(localScanVideo);
 
   try{
